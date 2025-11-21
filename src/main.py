@@ -68,7 +68,7 @@ logsys.configure()
 
 # create FastAPI app
 api = FastAPI(
-    title="WiseFood Data Catalog",
+    title="WiseFood Data API",
     version="0.0.1",
     root_path=config.settings["CONTEXT_PATH"],
     servers=[{"url": config.settings["CONTEXT_PATH"]}],

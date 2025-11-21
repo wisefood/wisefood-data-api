@@ -1,7 +1,7 @@
 """
-The Entity class is a base class for all catalog entities. The main responsibility
+The Entity class is a base class for all API entities. The main responsibility
 of the Entity class is to provide a common interface for interacting via the
-Catalog API. The class defines a set of operations that can be performed
+Data API. The class defines a set of operations that can be performed
 on an entity, such as listing, fetching, creating, updating, and deleting.
 The specific implementation of these operations is left to the subclasses.
 """
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class Entity:
     """
-    Base class for all catalog entities.
+    Base class for all API entities.
 
     In ReST terminology, an entity is a resource that can be accessed via an API.
 
