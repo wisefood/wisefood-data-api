@@ -312,14 +312,14 @@ class ArticleSchema(BaseSchema):
     organization_urn: Optional[UrnStr] = Field(
         None, description="URN of the publishing organization"
     )
-    abstract : NonEmptyAbstract = Field(
-        ..., description="Abstract of the article (<= 15000 chars)"
+    abstract : Optional[NonEmptyAbstract] = Field(
+        None, description="Abstract of the article (<= 15000 chars)"
     )
     category: Optional[NonEmptyStr] = Field(
         None, description="Category of the article (e.g. nutrition, health)"
     )
-    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=10)] = Field(
-        ..., description="List of authors"
+    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] = Field(
+        default_factory=list, description="List of authors"
     )
     publication_year: Optional[int] = Field(
         None, description="Publication year of the article (UTC)"
@@ -355,7 +355,7 @@ class ArticleCreationSchema(BaseModel):
         ..., description="URN slug (e.g., 'healthy_eating_article')"
     )
     title: NonEmptyStr = Field(..., description="Human-readable title")
-    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=25)] = Field(
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
         default_factory=list, description="Topic tags"
     )
     url: Optional[HttpUrl] = Field(None, description="Canonical public URL to the resource")
@@ -369,14 +369,14 @@ class ArticleCreationSchema(BaseModel):
     description: Optional[NonEmptyStr] = Field(
         None, description="Summary/abstract of the resource (<= 2000 chars)"
     )
-    abstract : NonEmptyAbstract = Field(
-        ..., description="Abstract of the article (<= 15000 chars)"
+    abstract : Optional[NonEmptyAbstract] = Field(
+        None, description="Abstract of the article (<= 15000 chars)"
     )
     category: Optional[NonEmptyStr] = Field(
         None, description="Category of the article (e.g. nutrition, health)"
     )
-    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=10)] = Field(
-        ..., description="List of authors"
+    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] = Field(
+        default_factory=list, description="List of authors"
     )
     publication_year: int = Field(
         ..., description="Publication year of the article (UTC)"
@@ -399,13 +399,13 @@ class ArticleUpdateSchema(BaseModel):
 
     title: NonEmptyStr | None = None
     description: NonEmptyStr | None = None
-    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=25)] | None = None
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] | None = None
     external_id: Optional[NonEmptyStr] = None
     url: HttpUrl | None = None
     license: Optional[LicenseId] = None
     abstract : NonEmptyAbstract | None = None
     category: Optional[NonEmptyStr] = None
-    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=10)] | None = None
+    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] | None = None
     publication_year: Optional[datetime] = None
     content: str | None = None
     venue: Optional[NonEmptyStr] = None
@@ -448,7 +448,7 @@ class OrganizationCreationSchema(BaseModel):
         use_enum_values=True,
     )
     urn: SlugStr = Field(
-        ..., description="URN slug (e.g., 'switzerland_calcium_intake_guide')"
+        ..., description="URN slug (e.g., 'switzerland_ministry_of_health')"
     )
     status: Status = Field(default=Status.active, description="Lifecycle status")
     title: NonEmptyStr = Field(..., description="Human-readable organization name")
