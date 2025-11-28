@@ -505,6 +505,327 @@ class ArticleUpdateSchema(BaseModel):
     @classmethod
     def normalize_publication_year(cls, v):
         return normalize_publication_year(v)
+    
+
+class FoodCompositionTableSchema(BaseSchema):
+    """
+    Schema representing a Food Composition Table resource (e.g. Swiss FCT v7.0),
+    including metadata about the database itself, not individual food items.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    type: Literal["food_composition_table"] = Field(
+        default="food_composition_table",
+        description="Resource type discriminator",
+        exclude=True,
+    )
+
+    # Core metadata
+    compiling_institution: NonEmptyStr = Field(
+        ...,
+        description="Institution responsible for compiling the Food Composition Table "
+                    "(e.g. 'Federal Food Safety and Veterinary Office, Switzerland')",
+    )
+    database_name: NonEmptyStr = Field(
+        ...,
+        description="Name and version of the food composition database "
+                    "(e.g. 'Swiss Food Composition Database, Version 7.0')",
+    )
+
+    # Classification / standardization schemes
+    classification_schemes: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Food classification schemes used (e.g. LanguaL, FoodEx2).",
+    )
+    standardization_schemes: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Nutrient standardization schemes (e.g. INFOODS Tags, EuroFIR).",
+    )
+
+    # Units, portions
+    measurement_units: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Measurement units used in the database "
+                    "(e.g. 'mg per 100g', 'µg per 100g', 'kcal per 100g', 'g per portion').",
+    )
+    reference_portions: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Reference portions or units used (e.g. '1 slice (40 g)', '1 cup (250 mL)', "
+                    "'1 tablespoon (15 mL)', '100 g edible portion').",
+    )
+
+    # Completeness / coverage
+    completeness_percent: Optional[float] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Estimated completeness of nutrient coverage as percentage (e.g. 92.0).",
+    )
+    completeness_description: Optional[NonEmptyStr] = Field(
+        None,
+        description="Free-text description of completeness (e.g. '92% nutrient coverage').",
+    )
+    nutrient_coverage: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="High-level nutrient coverage categories "
+                    "(e.g. 'Energy', 'Macronutrients', 'Vitamins', 'Minerals', 'Fatty Acids').",
+    )
+
+    # Formats / tasks
+    data_formats: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Available data formats (e.g. 'CSV', 'HTML', 'Web Tool').",
+    )
+    tasks_supported: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Supported use cases (e.g. 'Dietary Assessment', 'Research', 'Industry').",
+    )
+
+    # Scale of the database
+    number_of_entries: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Approximate number of food items in the table (e.g. ~1,200).",
+    )
+    min_nutrients_per_item: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Approximate minimum number of nutrients per item (e.g. 250).",
+    )
+    max_nutrients_per_item: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Approximate maximum number of nutrients per item (e.g. 400).",
+    )
+
+    # Optional linking / generic metadata
+    organization_urn: Optional[UrnStr] = Field(
+        None,
+        description="URN of the organization responsible for or owning the table.",
+    )
+    url: Optional[str] = Field(
+        None,
+        description="Public URL of the food composition database or its documentation.",
+    )
+    license: Optional[LicenseId] = Field(
+        None,
+        description="License identifier for the database.",
+    )
+    language: Optional[NonEmptyStr] = Field(
+        None,
+        description="Primary language of the database (e.g. 'de', 'fr', 'en').",
+    )
+    region: Optional[NonEmptyStr] = Field(
+        None,
+        description="Region/country to which the database applies (e.g. 'CH', 'Switzerland').",
+    )
+    description: Optional[NonEmptyStr] = Field(
+        None,
+        description="Short description or abstract of the food composition table.",
+    )
+    tags: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Free-form tags for categorization and search.",
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str]) -> List[str]:
+        if len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["type"] = "food_composition_table"
+        return data
+
+
+class FoodCompositionTableCreationSchema(BaseModel):
+    """
+    Schema for creating a Food Composition Table resource.
+    System generates: id, creator, created_at, updated_at.
+    User provides URN as slug; system prepends 'urn:food_composition_table:' internally.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    urn: SlugStr = Field(
+        ...,
+        description="URN slug (e.g. 'swiss_fct_v7_0'); system prepends 'urn:food_composition_table:'.",
+    )
+    title: NonEmptyStr = Field(
+        ...,
+        description="Human-readable title of the food composition table.",
+    )
+    description: Optional[NonEmptyStr] = Field(
+        None,
+        description="Short description or abstract of the food composition table.",
+    )
+    tags: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Free-form tags for categorization and search.",
+    )
+
+    compiling_institution: NonEmptyStr = Field(
+        ...,
+        description="Institution responsible for compiling the table.",
+    )
+    database_name: NonEmptyStr = Field(
+        ...,
+        description="Database name and version.",
+    )
+
+    classification_schemes: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Food classification schemes used (e.g. LanguaL, FoodEx2).",
+    )
+    standardization_schemes: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Nutrient standardization schemes (e.g. INFOODS Tags, EuroFIR).",
+    )
+
+    measurement_units: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Measurement units used in the database.",
+    )
+    reference_portions: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Reference portions or units.",
+    )
+
+    completeness_percent: Optional[float] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Estimated completeness of nutrient coverage as percentage.",
+    )
+    completeness_description: Optional[NonEmptyStr] = Field(
+        None,
+        description="Free-text description of completeness.",
+    )
+    nutrient_coverage: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="High-level nutrient coverage categories.",
+    )
+
+    data_formats: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Available data formats (e.g. CSV, HTML, Web Tool).",
+    )
+    tasks_supported: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Supported tasks (e.g. Dietary Assessment, Research, Industry).",
+    )
+
+    number_of_entries: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Approximate number of food items.",
+    )
+    min_nutrients_per_item: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Approximate minimum number of nutrients per item.",
+    )
+    max_nutrients_per_item: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Approximate maximum number of nutrients per item.",
+    )
+
+    organization_urn: Optional[UrnStr] = Field(
+        None,
+        description="URN of the compiling/owning organization.",
+    )
+    url: Optional[str] = Field(
+        None,
+        description="Public URL of the database or its documentation.",
+    )
+    license: Optional[LicenseId] = Field(
+        None,
+        description="License identifier.",
+    )
+    language: Optional[NonEmptyStr] = Field(
+        None,
+        description="Primary language of the database.",
+    )
+    region: Optional[NonEmptyStr] = Field(
+        None,
+        description="Region/country of applicability.",
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str]) -> List[str]:
+        if len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+
+class FoodCompositionTableUpdateSchema(BaseModel):
+    """
+    Schema for updating an existing Food Composition Table.
+    All fields optional. System fields (id, urn, creator, created_at, updated_at)
+    cannot be modified.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    title: Optional[NonEmptyStr] = None
+    description: Optional[NonEmptyStr] = None
+    tags: Optional[List[NonEmptyStr]] = None
+
+    compiling_institution: Optional[NonEmptyStr] = None
+    database_name: Optional[NonEmptyStr] = None
+
+    classification_schemes: Optional[List[NonEmptyStr]] = None
+    standardization_schemes: Optional[List[NonEmptyStr]] = None
+
+    measurement_units: Optional[List[NonEmptyStr]] = None
+    reference_portions: Optional[List[NonEmptyStr]] = None
+
+    completeness_percent: Optional[float] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Updated completeness percentage.",
+    )
+    completeness_description: Optional[NonEmptyStr] = None
+    nutrient_coverage: Optional[List[NonEmptyStr]] = None
+
+    data_formats: Optional[List[NonEmptyStr]] = None
+    tasks_supported: Optional[List[NonEmptyStr]] = None
+
+    number_of_entries: Optional[int] = Field(None, ge=0)
+    min_nutrients_per_item: Optional[int] = Field(None, ge=0)
+    max_nutrients_per_item: Optional[int] = Field(None, ge=0)
+
+    organization_urn: Optional[UrnStr] = None
+    url: Optional[str] = None
+    license: Optional[LicenseId] = None
+    language: Optional[NonEmptyStr] = None
+    region: Optional[NonEmptyStr] = None
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is not None and len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
 
 class OrganizationSchema(BaseModel):
     urn: UrnStr = Field(
