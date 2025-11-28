@@ -11,6 +11,7 @@ the underlying infrastructure provided by the Entity base class.
 """
 from typing import Optional, List, Dict, Any
 from backend.elastic import ELASTIC_CLIENT
+from entities.artifacts import ARTIFACT
 from exceptions import (
     DataError,
     InternalError,
@@ -40,10 +41,13 @@ class Article(Entity):
             ArticleUpdateSchema,
         )
     def get(self, urn: str) -> Dict[str, Any]:
-        """Retrieve an Article by its ID."""
         entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=urn)
         if entity is None:
             raise NotFoundError(f"Article with URN {urn} not found.")
+        else:
+            # Fetch and attach artifacts
+            artifacts = ARTIFACT.fetch(parent_urn=urn)
+            entity["artifacts"] = artifacts
         return entity
 
     def create(self, spec: ArticleCreationSchema, creator=None) -> Dict[str, Any]:

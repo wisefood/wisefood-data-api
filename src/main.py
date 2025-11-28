@@ -78,7 +78,7 @@ api = FastAPI(
 install_error_handler(api)
 
 # import routers
-from routers import core, guides, artifacts, organizations, articles
+from routers import core, guides, artifacts, organizations, articles, fctables
 
 
 api.include_router(artifacts.router)
@@ -86,7 +86,7 @@ api.include_router(artifacts.router)
 api.include_router(guides.router)
 api.include_router(organizations.router)
 api.include_router(articles.router)
-# api.include_router(policies.router)
+api.include_router(fctables.router)
 api.include_router(artifacts.router)
 api.include_router(core.router)
 

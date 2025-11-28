@@ -7,6 +7,7 @@ from es_schema import (
     organization_index,
     person_index,
     artifact_index,
+    foodtable_index
 )
 from main import config
 from schemas import SearchSchema
@@ -63,6 +64,10 @@ class ElasticsearchClientSingleton:
         if not es.indices.exists(index="persons"):
             es.indices.create(
                 index="persons", body=person_index(config.settings["ES_DIM"])
+            )
+        if not es.indices.exists(index="fctables"):
+            es.indices.create(
+                index="fctables", body=foodtable_index(config.settings["ES_DIM"])
             )
 
     @classmethod

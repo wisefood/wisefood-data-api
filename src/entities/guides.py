@@ -4,11 +4,12 @@ Guide Entity
 The Guide entity inherits from the base Entity class and provides
 methods to manage dietary guide data, including retrieval, creation,
 updating, and deletion of dietary guides. Collection operations such as
-LIST, FETCH and SEARCH are implemented in the parent class. This class 
+LIST, FETCH and SEARCH are implemented in the parent class. This class
 consolidates and applies schemas specific to dietary guides for data validation
 and serialization. It implements the CRUD operations while leveraging
 the underlying infrastructure provided by the Entity base class.
 """
+
 from typing import Optional, List, Dict, Any
 from backend.elastic import ELASTIC_CLIENT
 from exceptions import (
@@ -34,7 +35,11 @@ logger = logging.getLogger(__name__)
 class Guide(Entity):
     def __init__(self):
         super().__init__(
-            "guide", "guides", GuideSchema, GuideCreationSchema, GuideUpdateSchema
+            "guide", 
+            "guides", 
+            GuideSchema, 
+            GuideCreationSchema, 
+            GuideUpdateSchema
         )
 
     def get(self, urn: str) -> Dict[str, Any]:
