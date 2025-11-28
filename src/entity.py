@@ -163,7 +163,7 @@ class Entity:
         elif entity_type == "organization":
             if ELASTIC_CLIENT.get_entity(index_name="organizations", urn=urn) is None:
                 raise NotFoundError(f"Organization with URN {urn} not found.")
-
+            
     def get_identifier(self, identifier: str) -> str:
         """
         Get the URN of an entity given its URN or UUID.
@@ -211,14 +211,15 @@ class Entity:
         :return: The URN of the entity.
         """
         try:
-            qspec = {"fq": [{"id": uuid}]}
-            entity = ELASTIC_CLIENT.search_entities(
+            qspec = {"fq": [f"id:{uuid}"]}
+            result = ELASTIC_CLIENT.search_entities(
                 index_name=self.collection_name, qspec=qspec
             )
-            if not entity:
+            if not result.get("results"):  # Changed to check results key
                 raise NotFoundError(f"Entity with UUID {uuid} not found.")
-            return entity[0]["urn"]
+            return result["results"][0]["urn"]
         except Exception as e:
+            logger.error(f"Failed to resolve URN for UUID {uuid}: {e}")
             raise NotFoundError(f"Failed to resolve URN for UUID {uuid}: {e}")
 
     def get_cached(self, urn: str) -> Optional[Dict[str, Any]]:
@@ -388,3 +389,195 @@ class Entity:
         if not update:
             spec["created_at"] = str(datetime.now().isoformat())
         return spec
+
+
+"""
+DependentEntity
+------------------
+Base class for entities that are *dependent* on other API entities,
+such as ratings, comments, reactions, etc.
+
+A DependentEntity:
+- does NOT have its own URN (only an `id` UUID),
+- references a parent entity via a URN field (e.g. `target_urn`),
+- reuses most of Entity's infrastructure (search, list, fetch, create, patch, delete),
+- adds parent existence validation and tweaks system-field upsert logic.
+"""
+class DependentEntity(Entity):
+    """
+    Base class for entities that depend on other entities (e.g. engagements).
+
+    Key differences from `Entity`:
+    - No own URN; documents are addressed by `id` (UUID) only.
+    - Each document must reference a parent entity via a URN field (e.g. `target_urn`).
+    - Provides helper to validate that the parent entity exists.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        collection_name: str,
+        dump_schema: BaseModel,
+        creation_schema: BaseModel,
+        update_schema: Optional[BaseModel],
+        *,
+        parent_field: str = "target_urn",
+        parent_required: bool = True,
+    ):
+        """
+        :param name: Logical name of the dependent entity (e.g. 'engagement').
+        :param collection_name: Elasticsearch index name (e.g. 'engagements').
+        :param dump_schema: Pydantic schema used for serializing responses.
+        :param creation_schema: Pydantic schema used for validating create payloads.
+        :param update_schema: Pydantic schema used for validating patch payloads.
+        :param parent_field: Name of the field holding the parent's URN (e.g. 'target_urn').
+        :param parent_required: Whether the parent URN is required on create.
+        """
+        super().__init__(
+            name=name,
+            collection_name=collection_name,
+            dump_schema=dump_schema,
+            creation_schema=creation_schema,
+            update_schema=update_schema,
+        )
+        self.parent_field = parent_field
+        self.parent_required = parent_required
+
+    # ---------- Identifier handling (UUID only, no URNs) ----------
+
+    def get_identifier(self, identifier: str) -> str:
+        """
+        For dependent entities, we treat the identifier as a raw UUID.
+
+        - If it's a valid UUID -> return as-is.
+        - Otherwise -> error (no URN resolution for dependent entities).
+        """
+        if is_valid_uuid(identifier):
+            return identifier
+        raise DataError(
+            f"Dependent entity '{self.name}' must be referenced by UUID, got: {identifier}"
+        )
+
+    def get_entity(self, identifier: str) -> Dict[str, Any]:
+        """
+        Override the bundler to avoid URN logic; we only use UUIDs for dependent entities.
+        """
+        id_ = self.get_identifier(identifier)
+        obj = self.get_cached(id_)
+        return obj
+
+    def cache(self, identifier: str, obj) -> None:
+        """
+        Cache by UUID, not URN.
+        """
+        if config.settings.get("CACHE_ENABLED", False):
+            try:
+                REDIS.set(identifier, obj)
+            except Exception as e:
+                logger.error(f"Failed to cache dependent entity {identifier}: {e}")
+
+    def invalidate_cache(self, identifier: str) -> None:
+        """
+        Invalidate cache by UUID.
+        """
+        if config.settings.get("CACHE_ENABLED", False):
+            try:
+                REDIS.delete(identifier)
+            except Exception as e:
+                logger.error(f"Failed to invalidate cache for dependent entity {identifier}: {e}")
+
+    def get_cached(self, identifier: str) -> Dict[str, Any]:
+        obj = None
+        if config.settings.get("CACHE_ENABLED", False):
+            try:
+                obj = REDIS.get(identifier)
+            except Exception as e:
+                logger.error(f"Failed to get cached dependent entity {identifier}: {e}")
+
+        if obj is None:
+            obj = self.get(identifier)
+            self.cache(identifier, obj)
+
+        return self.dump_schema.model_validate(obj).model_dump(mode="json")
+
+    # ---------- Parent existence helpers ----------
+
+    def ensure_parent_exists(self, spec: Dict[str, Any]) -> None:
+        """
+        Ensure the parent entity referenced in `parent_field` exists.
+
+        Uses Entity.validate_existence under the hood.
+        """
+        parent_urn = spec.get(self.parent_field)
+
+        if not parent_urn:
+            if self.parent_required:
+                raise DataError(
+                    f"Field '{self.parent_field}' is required for dependent entity '{self.name}'."
+                )
+            # If not required and not present, nothing to validate
+            return
+
+        # Delegate validation to the global Entity resolver
+        Entity.validate_existence(parent_urn)
+
+    # ---------- System fields handling ----------
+
+    def upsert_system_fields(self, spec: Dict[str, Any], update: bool = False) -> Dict[str, Any]:
+        """
+        Upsert system fields for a dependent entity.
+
+        Differences vs Entity.upsert_system_fields:
+        - No URN handling.
+        - Always use `id` (UUID) as the primary identifier.
+        """
+        # Validate parent reference before anything else
+        if not update:
+            self.ensure_parent_exists(spec)
+
+        # Ensure id exists
+        if not update and "id" not in spec:
+            spec["id"] = str(uuid.uuid4())
+
+        # Prevent updates to creator if passed in accidentally
+        if update and "creator" in spec:
+            spec.pop("creator")
+
+        # Timestamps
+        spec["updated_at"] = datetime.now().isoformat()
+        if not update:
+            spec["created_at"] = datetime.now().isoformat()
+
+        return spec
+
+    # ---------- Optional convenience methods for dependents ----------
+
+    def list_for_parent(
+        self,
+        parent_urn: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        List dependent documents for a specific parent entity.
+
+        :param parent_urn: The URN of the parent entity (e.g. an article's URN).
+        :param limit: Max number of documents.
+        :param offset: Offset for pagination.
+        """
+        # Ensure the parent exists (fail fast)
+        Entity.validate_existence(parent_urn)
+
+        qspec = {
+            "fq": [{self.parent_field: parent_urn}],
+            "size": limit or 100,
+            "offset": offset or 0,
+        }
+
+        results = ELASTIC_CLIENT.search_entities(
+            index_name=self.collection_name, qspec=qspec
+        )
+        return [
+            self.dump_schema.model_validate(obj).model_dump(mode="json")
+            for obj in results
+        ]
