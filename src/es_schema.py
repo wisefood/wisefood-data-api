@@ -144,7 +144,6 @@ def article_index(dim: int):
                 "license": {"type": "keyword"},
                 "region": {"type": "keyword"},
                 "language": {"type": "keyword"},
-                "organization_urn": {"type": "keyword"},
                 "external_id": {"type": "keyword"},
                 "abstract": {"type": "text"},
                 "category": {"type": "keyword"},
@@ -173,6 +172,39 @@ def article_index(dim: int):
             }
         }
     }
+
+def engagement_index(dim: int):
+    return {
+        "mappings": {
+            "properties": {
+                "id": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "target_urn": {"type": "keyword"},    
+                "target_type": {"type": "keyword"},    
+
+                "user_id": {"type": "keyword"},
+
+                # Engagement payload
+                "rating": {"type": "float"},            # numeric rating (optional)
+                "reaction": {"type": "keyword"},        # like/love/etc (optional)
+                "comment": {"type": "text"},            # free text (optional)
+
+                # Classification & moderation
+                "kind": {"type": "keyword"},            # rating | comment | reaction
+                "status": {"type": "keyword"},          # pending | approved | rejected
+            }
+        }
+    }
+
+
+
 
 def foodtable_index(dim: int):
     return {
