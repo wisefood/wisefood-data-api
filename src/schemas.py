@@ -50,7 +50,7 @@ class LoginSchema(BaseModel):
 class SearchSchema(BaseModel):
     q: Optional[str] = Field(default=None, description="Search query string")
     limit: int = Field(
-        default=10, ge=1, le=100, description="Maximum number of results to return"
+        default=10, ge=1, le=1000, description="Maximum number of results to return"
     )
     offset: int = Field(
         default=0, ge=0, description="Number of results to skip for pagination"
@@ -67,6 +67,24 @@ class SearchSchema(BaseModel):
     fields: Optional[List[str]] = Field(
         default=None, description="List of fields to aggregate for faceting"
     )
+    facet_limit: int = Field(
+        default=50, ge=1, le=1000, description="Max number of facet buckets per field"
+    )
+
+    highlight: bool = Field(
+        default=False, description="Whether to return highlighted snippets"
+    )
+    highlight_fields: Optional[List[str]] = Field(
+        default=None,
+        description="Fields to highlight (defaults to fl or all if None)",
+    )
+    highlight_pre_tag: str = Field(
+        default="<em>", description="HTML tag (or text) to prefix highlights"
+    )
+    highlight_post_tag: str = Field(
+        default="</em>", description="HTML tag (or text) to suffix highlights"
+    )
+
 
 
 class Status(str, Enum):
@@ -120,6 +138,9 @@ class BaseSchema(BaseModel):
     license: Optional[LicenseId] = Field(None, description="License identifier")
     language: Union[Iso639_1, None] = Field(
         default=None, description="Language code (ISO 639-1), e.g., 'en'"
+    )
+    version: Optional[SemVer] = Field(
+        None, description="Resource version (Semantic Versioning)"
     )
 
     @field_validator("tags")
