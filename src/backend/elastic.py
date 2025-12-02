@@ -1,5 +1,6 @@
 import threading
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, NotFoundError
+from typing import Optional, List, Dict, Any
 from es_schema import (
     recipe_collection_index,
     article_index,
@@ -7,7 +8,7 @@ from es_schema import (
     organization_index,
     person_index,
     artifact_index,
-    foodtable_index
+    foodtable_index,
 )
 from main import config
 from schemas import SearchSchema
@@ -15,242 +16,230 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class ElasticsearchClientSingleton:
-    """Singleton class that holds a pool of Elasticsearch clients."""
+ELASTIC_HOST = config.settings["ELASTIC_HOST"]
+ES_DIM = config.settings["ES_DIM"]
 
-    _pool = []
-    _counter = 0
+
+class ElasticsearchClientSingleton:
+    """Singleton around a single thread-safe Elasticsearch client."""
+
+    _instance = None
     _lock = threading.Lock()
 
-    @classmethod
-    def get_client(cls) -> Elasticsearch:
-        """Ensure pool is initialized and return one Elasticsearch client (round robin)."""
-        if not cls._pool:
+    def __new__(cls):
+        if cls._instance is None:
             with cls._lock:
-                if not cls._pool:
-                    cls._initialize_elasticsearch()
-        pool_item = cls._select_pool_item()
-        return pool_item
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    instance._client = Elasticsearch(
+                        hosts=ELASTIC_HOST,
+                        # Optional tuning:
+                        # request_timeout=10,
+                        # max_retries=3,
+                        # retry_on_timeout=True,
+                    )
+                    instance._bootstrap()
+                    cls._instance = instance
+        return cls._instance
 
-    @classmethod
-    def _select_pool_item(cls):
-        with cls._lock:
-            index = cls._counter % len(cls._pool)
-            cls._counter += 1
-            return cls._pool[index]
+    @property
+    def client(self) -> Elasticsearch:
+        return self._client
 
-    @classmethod
-    def _bootstrap(cls):
+    def _bootstrap(self) -> None:
         """Create indices in Elasticsearch if they do not exist."""
-        es = Elasticsearch(hosts=config.settings["ELASTIC_HOST"])
-        if not es.indices.exists(index="recipes"):
-            es.indices.create(
-                index="recipes", body=recipe_collection_index(config.settings["ES_DIM"])
-            )
-        if not es.indices.exists(index="guides"):
-            es.indices.create(
-                index="guides", body=guide_index(config.settings["ES_DIM"])
-            )
-        if not es.indices.exists(index="artifacts"):
-            es.indices.create(
-                index="artifacts", body=artifact_index(config.settings["ES_DIM"])
-            )
-        if not es.indices.exists(index="articles"):
-            es.indices.create(
-                index="articles", body=article_index(config.settings["ES_DIM"])
-            )
-        if not es.indices.exists(index="organizations"):
-            es.indices.create(
-                index="organizations",
-                body=organization_index(config.settings["ES_DIM"]),
-            )
-        if not es.indices.exists(index="persons"):
-            es.indices.create(
-                index="persons", body=person_index(config.settings["ES_DIM"])
-            )
-        if not es.indices.exists(index="fctables"):
-            es.indices.create(
-                index="fctables", body=foodtable_index(config.settings["ES_DIM"])
-            )
+        indices = self._client.indices
 
-    @classmethod
-    def _initialize_elasticsearch(cls):
-        """Initialize a pool of Elasticsearch clients."""
-        pool_size = int(config.settings.get("ELASTICSEARCH_POOL_SIZE", 5))
-        for _ in range(pool_size):
-            client = Elasticsearch(hosts=config.settings["ELASTIC_HOST"])
-            cls._pool.append(client)
-        cls._bootstrap()
+        def ensure_index(name: str, body: Dict[str, Any]) -> None:
+            if not indices.exists(index=name):
+                logger.info("Creating index %s", name)
+                indices.create(index=name, body=body)
+
+        ensure_index("recipes", recipe_collection_index(ES_DIM))
+        ensure_index("guides", guide_index(ES_DIM))
+        ensure_index("artifacts", artifact_index(ES_DIM))
+        ensure_index("articles", article_index(ES_DIM))
+        ensure_index("organizations", organization_index(ES_DIM))
+        ensure_index("persons", person_index(ES_DIM))
+        ensure_index("fctables", foodtable_index(ES_DIM))
+
+    # --- Simple helpers -----------------------------------------------------
 
     def index_exists(self, index_name: str) -> bool:
-        client = self.get_client()
-        return client.indices.exists(index=index_name)
+        return self.client.indices.exists(index=index_name)
 
-    def get_entity(self, index_name: str, urn: str):
-        client = self.get_client()
+    def get_entity(self, index_name: str, urn: str) -> Optional[Dict[str, Any]]:
         try:
-            r = client.get(index=index_name, id=urn)
+            r = self.client.get(index=index_name, id=urn)
             return r["_source"]
-        except Exception:
+        except NotFoundError:
             return None
+        except Exception:
+            logger.exception("Error fetching entity %s from %s", urn, index_name)
+            raise
 
     def list_entities(
         self, index_name: str, size: int = 1000, offset: int = 0
-    ) -> list[str]:
-        client = self.get_client()
+    ) -> List[str]:
         body = {
             "from": offset,
             "size": size,
-            "_source": False,
             "query": {"bool": {"must_not": {"term": {"status": "deleted"}}}},
         }
-        r = client.search(index=index_name, body=body, _source_includes=["_id"])
+        r = self.client.search(index=index_name, body=body)
         return [h["_id"] for h in r["hits"]["hits"]]
 
-    def fetch_entities(self, index_name: str, limit: int, offset: int) -> list[dict]:
-        """
-        Fetch entity representations from an Elasticsearch index
-        using offset + limit pagination.
-
-        Args:
-            index_name: name of the ES index
-            limit: number of entities to return
-            offset: starting offset for pagination
-
-        Returns:
-            List of entity documents (_source only).
-        """
-        client = self.get_client()
+    def fetch_entities(
+        self, index_name: str, limit: int, offset: int
+    ) -> List[Dict[str, Any]]:
         body = {
             "from": offset,
             "size": limit,
             "query": {"bool": {"must_not": {"term": {"status": "deleted"}}}},
         }
-        r = client.search(
-            index=index_name,
-            body=body,
-        )
+        r = self.client.search(index=index_name, body=body)
         return [hit["_source"] for hit in r["hits"]["hits"]]
 
-    def index_entity(self, index_name: str, document: dict):
-        client = self.get_client()
-        client.index(
-            index=index_name, id=document.get("urn", document.get("id")), document=document, refresh="wait_for"
+    def index_entity(self, index_name: str, document: Dict[str, Any]) -> None:
+        doc_id = document.get("urn", document.get("id"))
+        self.client.index(
+            index=index_name,
+            id=doc_id,
+            document=document,
+            refresh="wait_for",
         )
 
-    def delete_entity(self, index_name: str, urn: str):
-        client = self.get_client()
-        client.delete(index=index_name, id=urn, refresh="wait_for")
+    def delete_entity(self, index_name: str, urn: str) -> None:
+        self.client.delete(index=index_name, id=urn, refresh="wait_for")
 
-    def update_entity(self, index_name: str, document: dict):
+    def update_entity(self, index_name: str, document: Dict[str, Any]) -> None:
         # Avoid updating if only system fields are present
         if set(document.keys()) == {"updated_at", "urn"}:
             return
-        client = self.get_client()
-        entity = self.get_entity(index_name, document["urn"])
 
-        if entity:
-            merged = {**entity, **document}
-            client.update(
-                index=index_name, id=entity["urn"], doc=merged, refresh="wait_for"
+        existing = self.get_entity(index_name, document["urn"])
+        if not existing:
+            return
+
+        merged = {**existing, **document}
+        self.client.update(
+            index=index_name,
+            id=document["urn"],
+            doc=merged,
+            refresh="wait_for",
+        )
+
+    # --- Search with faceting ----------------------------------------------
+
+    def search_entities(self, index_name: str, qspec: SearchSchema) -> Dict[str, Any]:
+        q = qspec.model_dump()
+
+        must_clauses = []
+        if q.get("q"):
+            must_clauses.append(
+                {
+                    "multi_match": {
+                        "query": q["q"],
+                        "fields": ["*"],  # TODO: replace with explicit field list
+                    }
+                }
             )
 
-    def search_entities(self, index_name: str, qspec: SearchSchema):
-        client = self.get_client()
-        if "offset" not in qspec or qspec.get("offset") is None:
-            qspec["offset"] = 0
-        if "limit" not in qspec or qspec.get("limit") is None:
-            qspec["limit"] = 100
+        filters = []
+        if q.get("fq"):
+            for fq in q["fq"]:
+                filters.append({"query_string": {"query": fq}})
 
-        body = {
-            "from": qspec.get("offset"),
-            "size": qspec.get("limit"),
+        body: Dict[str, Any] = {
+            "from": q["offset"],
+            "size": q["limit"],
             "query": {
                 "bool": {
-                    "must": [{"multi_match": {"query": qspec.get("q"), "fields": ["*"]}}] if qspec.get("q") else [],
-                    "filter": [{"query_string": {"query": fq}} for fq in qspec.get("fq", [])] if qspec.get("fq") else [],
+                    "must": must_clauses,
+                    "filter": filters,
                 }
             },
         }
 
-        # Determine which fields to aggregate on
-        facet_fields = qspec.get("facet_fields", [])
-        
-        # If no facet_fields specified, extract fields from fq filters
-        if not facet_fields and qspec.get("fq"):
+        facet_fields = q.get("fields") or []
+
+        if not facet_fields and q.get("fq"):
+            # best-effort extraction of facet fields from "field:value" filters
             extracted_fields = set()
-            for fq in qspec.get("fq"):
-                # Extract field name from filter queries like "tags:wellness" or "category:health"
+            for fq in q["fq"]:
                 if ":" in fq:
-                    field_name = fq.split(":")[0].strip()
+                    field_name = fq.split(":", 1)[0].strip()
                     extracted_fields.add(field_name)
             facet_fields = list(extracted_fields)
 
-        # Add aggregations for faceting
         if facet_fields:
             body["aggs"] = {}
-            for facet_field in facet_fields:
-                # Try the field as-is first (for keyword type fields)
-                body["aggs"][f"{facet_field}_facet"] = {
+            for field in facet_fields:
+                body["aggs"][f"{field}_facet"] = {
                     "terms": {
-                        "field": facet_field,
-                        "size": qspec.get("facet_limit", 50)
+                        # Using .keyword by default is safer for text fields
+                        "field": f"{field}.keyword",
+                        "size": q["facet_limit"],
                     }
                 }
 
-        if qspec.get("fl"):
+        if q.get("fl"):
             source_fields = []
-            source_includes = {}
-            for field in qspec.get("fl"):
-                if ":" in field:
-                    original_field, alias = field.split(":")
-                    source_fields.append(original_field)
-                    source_includes[original_field] = alias
+            alias_map: Dict[str, str] = {}
+            for f in q["fl"]:
+                if ":" in f:
+                    original, alias = f.split(":", 1)
+                    source_fields.append(original)
+                    alias_map[original] = alias
                 else:
-                    source_fields.append(field)
+                    source_fields.append(f)
             body["_source"] = source_fields
+        else:
+            alias_map = {}
 
-        if qspec.get("sort"):
-            sort_field, sort_order = qspec.get("sort").split() if " " in qspec.get("sort") else (qspec.get("sort"), "asc")
+        if q.get("sort"):
+            sort_field, sort_order = (q["sort"].split() + ["asc"])[:2]
             body["sort"] = [{sort_field: {"order": sort_order}}]
 
-        try:
-            r = client.search(index=index_name, body=body)
-        except Exception as e:
-            # If aggregation fails, try with .keyword suffix
-            if facet_fields and "aggs" in body:
-                body["aggs"] = {}
-                for facet_field in facet_fields:
-                    body["aggs"][f"{facet_field}_facet"] = {
-                        "terms": {
-                            "field": f"{facet_field}.keyword",
-                            "size": qspec.get("facet_limit", 50)
-                        }
-                    }
-                r = client.search(index=index_name, body=body)
+        if q.get("highlight"):
+            # Decide which fields to highlight:
+            # 1) explicit highlight_fields
+            # 2) else fl (if present)
+            # 3) else everything ("*")
+            if q.get("highlight_fields"):
+                hl_fields = q["highlight_fields"]
+            elif q.get("fl"):
+                # use the original field names, not aliases
+                hl_fields = [f.split(":", 1)[0] for f in q["fl"]]
             else:
-                raise e
-        
-        # Process results
-        results = []
+                hl_fields = ["*"]
+
+            body["highlight"] = {
+                "pre_tags": [q["highlight_pre_tag"]],
+                "post_tags": [q["highlight_post_tag"]],
+                "fields": {field: {} for field in hl_fields},
+            }
+
+        r = self.client.search(index=index_name, body=body)
+
+        results: List[Dict[str, Any]] = []
         for hit in r["hits"]["hits"]:
             source = hit["_source"]
-            if qspec.get("fl"):
-                aliased_source = {}
-                for field in qspec.get("fl"):
-                    if ":" in field:
-                        original_field, alias = field.split(":")
-                        if original_field in source:
-                            aliased_source[alias] = source[original_field]
-                    else:
-                        if field in source:
-                            aliased_source[field] = source[field]
-                results.append(aliased_source)
+
+            if q.get("fl"):
+                aliased = {}
+                for original in body["_source"]:
+                    if original in source:
+                        aliased[alias_map.get(original, original)] = source[original]
             else:
-                results.append(source)
-        
-        # Extract facet counts
-        facets = {}
+                aliased = dict(source)
+
+            if q.get("highlight") and "highlight" in hit:
+                aliased["_highlight"] = hit["highlight"]
+
+            results.append(aliased)
+
+        facets: Dict[str, List[Dict[str, Any]]] = {}
         if "aggregations" in r:
             for agg_name, agg_data in r["aggregations"].items():
                 field_name = agg_name.replace("_facet", "")
@@ -258,7 +247,12 @@ class ElasticsearchClientSingleton:
                     {"value": bucket["key"], "count": bucket["doc_count"]}
                     for bucket in agg_data["buckets"]
                 ]
-        
-        return {"results": results, "facets": facets, "total": r["hits"]["total"]["value"]}
+
+        return {
+            "results": results,
+            "facets": facets,
+            "total": r["hits"]["total"]["value"],
+        }
+
 
 ELASTIC_CLIENT = ElasticsearchClientSingleton()
