@@ -22,11 +22,14 @@ class ElasticsearchClientSingleton:
     _counter = 0
     _lock = threading.Lock()
 
-    def get_client(self) -> Elasticsearch:
+    @classmethod
+    def get_client(cls) -> Elasticsearch:
         """Ensure pool is initialized and return one Elasticsearch client (round robin)."""
-        if not self._pool:
-            self._initialize_elasticsearch()
-        pool_item = self._select_pool_item()
+        if not cls._pool:
+            with cls._lock:
+                if not cls._pool:
+                    cls._initialize_elasticsearch()
+        pool_item = cls._select_pool_item()
         return pool_item
 
     @classmethod
