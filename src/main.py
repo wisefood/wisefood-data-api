@@ -21,6 +21,9 @@ class Config:
             "ELASTIC_HOST", "http://elasticsearch:9200"
         )
         self.settings["ES_DIM"] = int(os.getenv("ES_DIM", 384))
+        self.settings["EMBEDDING_MODEL"] = os.getenv(
+            "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+        )
         self.settings["MINIO_ENDPOINT"] = os.getenv(
             "MINIO_ENDPOINT", "http://minio:9000"
         )

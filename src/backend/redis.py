@@ -59,6 +59,38 @@ class RedisClient:
         except Exception as e:
             raise BadGatewayError(e)
 
+    def lpush(self, key, value):
+        """Push a value to the left of a Redis list."""
+        try:
+            if self._pool is None:
+                self._initialize_redis()
+            conn = redis.Redis(connection_pool=self._pool)
+            if isinstance(value, dict):
+                value = json.dumps(value)
+            conn.lpush(key, value)
+        except Exception as e:
+            raise BadGatewayError(e)
+
+    def brpop(self, key, timeout=0):
+        """Blocking pop from the right of a Redis list."""
+        try:
+            if self._pool is None:
+                self._initialize_redis()
+            conn = redis.Redis(connection_pool=self._pool)
+            return conn.brpop(key, timeout=timeout)
+        except Exception as e:
+            raise BadGatewayError(e)
+
+    def expire(self, key, ttl_seconds: int):
+        """Set an expiration on a key."""
+        try:
+            if self._pool is None:
+                self._initialize_redis()
+            conn = redis.Redis(connection_pool=self._pool)
+            conn.expire(key, ttl_seconds)
+        except Exception as e:
+            raise BadGatewayError(e)
+
 
 # Create a singleton instance of RedisClient
 REDIS = RedisClient()
