@@ -10,6 +10,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./src /app/src
 
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
 WORKDIR /app/src
 EXPOSE ${PORT:-8000}
+
 CMD /bin/sh -c 'uvicorn main:api --host 0.0.0.0 --port ${PORT:-8000}'
