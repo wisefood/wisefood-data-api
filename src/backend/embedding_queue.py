@@ -1,11 +1,11 @@
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
 from backend.redis import REDIS
-from main import config
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class EmbeddingQueue:
         self.queue_key = queue_key
         self.status_prefix = status_prefix
         self.status_ttl_seconds = status_ttl_seconds
-        self.db = db if db is not None else config.settings.get("REDIS_QUEUE_DB", config.settings.get("REDIS_DB", 1))
+        self.db = db if db is not None else int(os.getenv("REDIS_QUEUE_DB", os.getenv("REDIS_DB", 1)))
 
     def _status_key(self, job_id: str) -> str:
         return f"{self.status_prefix}{job_id}"

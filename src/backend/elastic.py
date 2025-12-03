@@ -1,5 +1,6 @@
+import os
 import threading
-from elasticsearch import Elasticsearch, NotFoundError
+from elasticsearch import Elasticsearch, NotFoundError, BadRequestError
 from typing import Optional, List, Dict, Any
 from es_schema import (
     recipe_collection_index,
@@ -10,14 +11,13 @@ from es_schema import (
     artifact_index,
     foodtable_index,
 )
-from main import config
 from schemas import SearchSchema
 import logging
 
 logger = logging.getLogger(__name__)
 
-ELASTIC_HOST = config.settings["ELASTIC_HOST"]
-ES_DIM = config.settings["ES_DIM"]
+ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
+ES_DIM = int(os.getenv("ES_DIM", 384))
 
 
 class ElasticsearchClientSingleton:
@@ -131,6 +131,27 @@ class ElasticsearchClientSingleton:
 
     # --- Search with faceting ----------------------------------------------
 
+    def parse_sort_string(self, sort_str: str):
+        # Allow commas or spaces between fields
+        tokens = sort_str.replace(",", " ").split()
+        result = []
+
+        i = 0
+        while i < len(tokens):
+            field = tokens[i]
+            order = "asc"
+
+            # If next token is asc/desc, use it
+            if i + 1 < len(tokens) and tokens[i + 1].lower() in ("asc", "desc"):
+                order = tokens[i + 1].lower()
+                i += 2
+            else:
+                i += 1
+
+            result.append((field, order))
+
+        return result
+
     def search_entities(self, index_name: str, qspec: SearchSchema) -> Dict[str, Any]:
         q = qspec.model_dump()
 
@@ -140,7 +161,7 @@ class ElasticsearchClientSingleton:
                 {
                     "multi_match": {
                         "query": q["q"],
-                        "fields": ["*"],  # TODO: replace with explicit field list
+                        "fields": ["*"],
                     }
                 }
             )
@@ -197,9 +218,18 @@ class ElasticsearchClientSingleton:
         else:
             alias_map = {}
 
-        if q.get("sort"):
-            sort_field, sort_order = (q["sort"].split() + ["asc"])[:2]
-            body["sort"] = [{sort_field: {"order": sort_order}}]
+        sort_spec = q.get("sort")
+
+        if sort_spec:
+            sort_items = self.parse_sort_string(sort_spec)
+            body["sort"] = []
+
+            for field, order in sort_items:
+                # Relevance sorting
+                if field.lower() in ("relevance", "score", "_score"):
+                    body["sort"].append({"_score": {"order": "desc"}})
+                else:
+                    body["sort"].append({field: {"order": order}})
 
         if q.get("highlight"):
             # Decide which fields to highlight:
@@ -220,7 +250,22 @@ class ElasticsearchClientSingleton:
                 "fields": {field: {} for field in hl_fields},
             }
 
-        r = self.client.search(index=index_name, body=body)
+        # --- Execute search, with retry on fielddata error ------------------
+        try:
+            r = self.client.search(index=index_name, body=body)
+        except BadRequestError as e:
+            if "Fielddata is disabled" in str(e):
+                fixed = []
+                for s in body["sort"]:
+                    (field, opts), = s.items()
+                    if not field.endswith(".keyword") and not field.startswith("_"):
+                        fixed.append({f"{field}.keyword": opts})
+                    else:
+                        fixed.append(s)
+                body["sort"] = fixed
+                r = self.client.search(index=index_name, body=body)
+            else:
+                raise
 
         results: List[Dict[str, Any]] = []
         for hit in r["hits"]["hits"]:
@@ -233,6 +278,8 @@ class ElasticsearchClientSingleton:
                         aliased[alias_map.get(original, original)] = source[original]
             else:
                 aliased = dict(source)
+
+            aliased["_score"] = hit.get("_score")
 
             if q.get("highlight") and "highlight" in hit:
                 aliased["_highlight"] = hit["highlight"]

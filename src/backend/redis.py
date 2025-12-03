@@ -1,5 +1,5 @@
+import os
 import redis
-from main import config
 
 from exceptions import (
     BadGatewayError,
@@ -13,9 +13,11 @@ class RedisClient:
 
     @classmethod
     def _initialize_redis(cls, db: int):
+        host = os.getenv("REDIS_HOST", "redis")
+        port = int(os.getenv("REDIS_PORT", 6379))
         pool = redis.ConnectionPool(
-            host=config.settings["REDIS_HOST"],
-            port=config.settings["REDIS_PORT"],
+            host=host,
+            port=port,
             db=db,
             decode_responses=True,
             max_connections=10,
@@ -33,7 +35,7 @@ class RedisClient:
     def set(self, key, value, db: int | None = None):
         """Set a value in Redis using a connection from the pool."""
         try:
-            db_to_use = db if db is not None else config.settings["REDIS_DB"]
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
             conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
             if isinstance(value, dict):
                 conn.set(key, json.dumps(value))  # Serialize dict to JSON string
@@ -45,7 +47,7 @@ class RedisClient:
     def get(self, key, db: int | None = None):
         """Get a value from Redis using a connection from the pool."""
         try:
-            db_to_use = db if db is not None else config.settings["REDIS_DB"]
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
             conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
             value = conn.get(key)
             try:
@@ -58,7 +60,7 @@ class RedisClient:
     def delete(self, key, db: int | None = None):
         """Delete a value from Redis using a connection from the pool."""
         try:
-            db_to_use = db if db is not None else config.settings["REDIS_DB"]
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
             conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
             conn.delete(key)
         except Exception as e:
@@ -67,7 +69,7 @@ class RedisClient:
     def lpush(self, key, value, db: int | None = None):
         """Push a value to the left of a Redis list."""
         try:
-            db_to_use = db if db is not None else config.settings["REDIS_DB"]
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
             conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
             if isinstance(value, dict):
                 value = json.dumps(value)
@@ -78,7 +80,7 @@ class RedisClient:
     def brpop(self, key, timeout=0, db: int | None = None):
         """Blocking pop from the right of a Redis list."""
         try:
-            db_to_use = db if db is not None else config.settings["REDIS_DB"]
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
             conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
             return conn.brpop(key, timeout=timeout)
         except Exception as e:
@@ -87,7 +89,7 @@ class RedisClient:
     def expire(self, key, ttl_seconds: int, db: int | None = None):
         """Set an expiration on a key."""
         try:
-            db_to_use = db if db is not None else config.settings["REDIS_DB"]
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
             conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
             conn.expire(key, ttl_seconds)
         except Exception as e:

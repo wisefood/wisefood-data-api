@@ -1,8 +1,11 @@
 import os
+import threading
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from routers.generic import install_error_handler
 import uvicorn
 import logsys
+from workers.embedding_worker import EmbeddingWorker
 
 
 # Configuration context
@@ -72,12 +75,32 @@ config.setup()
 logsys.configure()
 
 
+_worker_stop_event = threading.Event()
+_embedding_worker = EmbeddingWorker()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_thread = threading.Thread(
+        target=_embedding_worker.run_forever,
+        kwargs={"sleep_when_idle": 1, "stop_event": _worker_stop_event},
+        daemon=True,
+        name="embedding-worker",
+    )
+    worker_thread.start()
+    try:
+        yield
+    finally:
+        _worker_stop_event.set()
+
+
 # create FastAPI app
 api = FastAPI(
     title="WiseFood Data API",
     version="0.0.1",
     root_path=config.settings["CONTEXT_PATH"],
     servers=[{"url": config.settings["CONTEXT_PATH"]}],
+    lifespan=lifespan,
 )
 
 # Initiliaze exception handlers
@@ -87,7 +110,6 @@ install_error_handler(api)
 from routers import core, guides, artifacts, organizations, articles, fctables
 
 
-api.include_router(artifacts.router)
 # api.include_router(recipes.router)
 api.include_router(guides.router)
 api.include_router(organizations.router)
