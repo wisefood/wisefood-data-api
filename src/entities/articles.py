@@ -4,11 +4,12 @@ Article Entity
 The Article entity inherits from the base Entity class and provides
 methods to manage organization data, including retrieval, creation,
 updating, and deletion of scientific articles. Collection operations such as
-LIST, FETCH and SEARCH are implemented in the parent class. This class 
+LIST, FETCH and SEARCH are implemented in the parent class. This class
 consolidates and applies schemas specific to scientific articles for data validation
 and serialization. It implements the CRUD operations while leveraging
 the underlying infrastructure provided by the Entity base class.
 """
+
 from typing import Optional, List, Dict, Any
 from backend.elastic import ELASTIC_CLIENT
 from entities.artifacts import ARTIFACT
@@ -19,6 +20,7 @@ from exceptions import (
     ConflictError,
 )
 import logging
+import uuid
 from schemas import (
     SearchSchema,
     ArticleCreationSchema,
@@ -27,6 +29,7 @@ from schemas import (
 )
 
 from entity import Entity
+from backend.embedding_queue import EMBEDDING_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class Article(Entity):
             ArticleCreationSchema,
             ArticleUpdateSchema,
         )
+
     def get(self, urn: str) -> Dict[str, Any]:
         entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=urn)
         if entity is None:
@@ -75,6 +79,74 @@ class Article(Entity):
             )
         except Exception as e:
             raise InternalError(f"Failed to create article: {e}")
+        # Fire-and-forget embedding jobs; do not block article creation
+        try:
+            # 1) Entity-level embedding (embedding)
+            EMBEDDING_QUEUE.enqueue(
+                self.embed(article_dict["urn"], article_dict, creator)
+            )
+            # 2) RAG chunks (rag_chunk_index)
+            EMBEDDING_QUEUE.enqueue(
+                self.embed_chunks(article_dict["urn"], article_dict, creator)
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to enqueue embedding for article %s: %s",
+                article_dict.get("urn"),
+                e,
+            )
+
+    def embed(self, urn: str, spec: Dict[str, Any], creator=None) -> Dict[str, Any]:
+        """Build an embedding job for the given article."""
+        self.validate_existence(urn)
+        article = spec or {}
+        if not article.get("content"):
+            # Fetch article if content not provided in spec
+            article = self.get(urn)
+
+        text_parts = [
+            article.get("title"),
+            article.get("abstract"),
+            article.get("content"),
+        ]
+        text = "\n".join([part for part in text_parts if part])
+        if not text:
+            raise DataError("No article text available for embedding.")
+
+        return {
+            "job_id": str(uuid.uuid4()),
+            "job_type": "entity_embedding",
+            "entity": self.name,
+            "urn": urn,
+            "index_name": self.collection_name,
+            "vector_field": "embedding",
+            "text": text,
+            "metadata": {
+                "source": "article.embed",
+                "requested_by": creator.get("preferred_username") if creator else None,
+            },
+        }
+    
+    def embed_chunks(self, urn: str, spec: Dict[str, Any], creator=None) -> Dict[str, Any]:
+        """
+        Build a job that will create RAG chunks for this article and index them into rag_chunk_index.
+        """
+        self.validate_existence(urn)
+
+        # we don't strictly need spec here; worker can fetch fresh from ES
+        return {
+            "job_id": str(uuid.uuid4()),
+            "job_type": "rag_chunks",
+            "entity": self.name,
+            "urn": urn,
+            "source_index": self.collection_name,
+            "rag_index": "rag_chunk_index", 
+            "metadata": {
+                "source": "article.embed_rag",
+                "requested_by": creator.get("preferred_username") if creator else None,
+            },
+        }
+
 
     def patch(self, urn: str, spec: Dict[str, Any], updater=None) -> Dict[str, Any]:
         """Partially update an existing article."""

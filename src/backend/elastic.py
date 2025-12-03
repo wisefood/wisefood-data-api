@@ -129,6 +129,13 @@ class ElasticsearchClientSingleton:
             refresh="wait_for",
         )
 
+    def delete_by_query(self, index_name: str, query: Dict[str, Any]) -> None:
+        self.client.delete_by_query(
+            index=index_name,
+            body={"query": query},
+            refresh=True,
+        )
+
     # --- Search with faceting ----------------------------------------------
 
     def parse_sort_string(self, sort_str: str):

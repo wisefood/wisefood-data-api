@@ -104,6 +104,10 @@ def recipe_collection_index(dim: int) -> Dict[str, Any]:
                     "type": "date",
                     "format": "strict_date_optional_time||epoch_millis",
                 },
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
@@ -161,6 +165,10 @@ def artifact_index(dim: int) -> Dict[str, Any]:
                     "search_analyzer": "default_text",
                 },
                 "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
@@ -261,6 +269,10 @@ def guide_index(dim: int) -> Dict[str, Any]:
                 },
                 # Semantic embedding over selected guide fields
                 "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
@@ -364,6 +376,10 @@ def article_index(dim: int) -> Dict[str, Any]:
                 },
                 # Semantic embedding over article text
                 "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
@@ -463,6 +479,10 @@ def foodtable_index(dim: int) -> Dict[str, Any]:
                 },
                 "tags": {"type": "keyword"},
                 "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
@@ -514,6 +534,10 @@ def organization_index(dim: int) -> Dict[str, Any]:
                     "format": "strict_date_optional_time||epoch_millis",
                 },
                 "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
@@ -553,6 +577,10 @@ def person_index(dim: int) -> Dict[str, Any]:
                 "image_url": {"type": "keyword"},
                 "tags": {"type": "keyword"},
                 "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
