@@ -20,6 +20,7 @@ from schemas import (
     ArtifactCreationSchema,
     ArtifactSchema,
     ArtifactUpdateSchema,
+    SearchSchema,
 )
 from entity import Entity
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 #
 #  *** Artifact Entity ***
 #
-#  The artifact entity is currently
+#  The artifact entity currently
 #  hosts all features related to
 #  linking resources under a catalog
 #  entity. It is not considered
@@ -67,10 +68,16 @@ class Artifact(Entity):
         except NotFoundError:
             raise NotFoundError(f"Parent entity {parent_urn} not found.")
 
-        qspec = {
+        query = {
             "limit": 1000,
             "fq": [f'parent_urn:"{parent_urn}"'] 
         }
+
+        try:
+            qspec = SearchSchema.model_validate(query)
+        except Exception as e:
+            raise DataError(f"Invalid search query: {e}")
+
         
         response = ELASTIC_CLIENT.search_entities(
             index_name=self.collection_name, qspec=qspec

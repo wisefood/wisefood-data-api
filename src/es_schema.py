@@ -50,6 +50,7 @@ def _embedding_field(dim: int) -> Dict[str, Any]:
 # Recipe collection
 # ---------------------------------------------------------------------------
 
+
 def recipe_collection_index(dim: int) -> Dict[str, Any]:
     return {
         "settings": DEFAULT_SETTINGS,
@@ -117,6 +118,7 @@ def recipe_collection_index(dim: int) -> Dict[str, Any]:
 # Artifact index
 # ---------------------------------------------------------------------------
 
+
 def artifact_index(dim: int) -> Dict[str, Any]:
     """
     Elasticsearch mapping for artifacts.
@@ -177,6 +179,7 @@ def artifact_index(dim: int) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Guide index
 # ---------------------------------------------------------------------------
+
 
 def guide_index(dim: int) -> Dict[str, Any]:
     """
@@ -281,6 +284,7 @@ def guide_index(dim: int) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Article index
 # ---------------------------------------------------------------------------
+
 
 def article_index(dim: int) -> Dict[str, Any]:
     return {
@@ -389,6 +393,7 @@ def article_index(dim: int) -> Dict[str, Any]:
 # Engagement index (ratings / reactions / comments)
 # ---------------------------------------------------------------------------
 
+
 def engagement_index(dim: int) -> Dict[str, Any]:
     # dim unused here, but kept for a consistent function signature
     return {
@@ -405,10 +410,12 @@ def engagement_index(dim: int) -> Dict[str, Any]:
                     "format": "strict_date_optional_time||epoch_millis",
                 },
                 "target_urn": {"type": "keyword"},
-                "target_type": {"type": "keyword"},  # guide | article | recipe | foodtable | organization | person
+                "target_type": {
+                    "type": "keyword"
+                },  # guide | article | recipe | foodtable | organization | person
                 "user_id": {"type": "keyword"},
                 # Engagement payload
-                "rating": {"type": "float"},     # numeric rating (optional)
+                "rating": {"type": "float"},  # numeric rating (optional)
                 "reaction": {"type": "keyword"},  # like/love/etc (optional)
                 "comment": {
                     "type": "text",
@@ -416,8 +423,8 @@ def engagement_index(dim: int) -> Dict[str, Any]:
                     "search_analyzer": "default_text",
                 },
                 # Classification & moderation
-                "kind": {"type": "keyword"},      # rating | comment | reaction
-                "status": {"type": "keyword"},    # pending | approved | rejected
+                "kind": {"type": "keyword"},  # rating | comment | reaction
+                "status": {"type": "keyword"},  # pending | approved | rejected
             }
         },
     }
@@ -426,13 +433,16 @@ def engagement_index(dim: int) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Food table index
 # ---------------------------------------------------------------------------
-
-def foodtable_index(dim: int) -> Dict[str, Any]:
+def fctable_index(dim: int) -> Dict[str, Any]:
     return {
         "settings": DEFAULT_SETTINGS,
         "mappings": {
             "properties": {
+                # ------------------------------------------------------------------
+                # Base entity metadata (consistent with BaseSchema-based entities)
+                # ------------------------------------------------------------------
                 "urn": {"type": "keyword"},
+                "id": {"type": "keyword"},
                 "title": {
                     "type": "text",
                     "analyzer": "default_text",
@@ -446,38 +456,66 @@ def foodtable_index(dim: int) -> Dict[str, Any]:
                         },
                     },
                 },
-                "category": {"type": "keyword"},
-                "language": {"type": "keyword"},
-                "region": {"type": "keyword"},
                 "description": {
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
-                "nutritional_mappings": {
-                    "type": "nested",
-                    "properties": {
-                        "name": {
-                            "type": "text",
-                            "analyzer": "default_text",
-                            "search_analyzer": "default_text",
-                            "fields": {
-                                "keyword": {"type": "keyword"},
-                            },
-                        },
-                        "amount": {"type": "float"},
-                        "serving_size": {"type": "keyword"},
-                        "calories": {"type": "float"},
-                        "protein": {"type": "float"},
-                        "carbs": {"type": "float"},
-                        "fat": {"type": "float"},
-                        "fiber": {"type": "float"},
-                        "sugar": {"type": "float"},
-                        "sodium": {"type": "float"},
-                        "vitamins": {"type": "object"},
-                    },
-                },
                 "tags": {"type": "keyword"},
+                "status": {"type": "keyword"},
+                "creator": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "url": {"type": "keyword"},
+                "license": {"type": "keyword"},
+                "language": {"type": "keyword"},
+                "region": {"type": "keyword"},
+                # ------------------------------------------------------------------
+                # Version metadata (for VersionedEntity active snapshot)
+                # ------------------------------------------------------------------
+                "version_label": {"type": "keyword"},
+                "release_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                # ------------------------------------------------------------------
+                # FCT-specific structured metadata
+                # ------------------------------------------------------------------
+                "compiling_institution": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "database_name": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "classification_schemes": {"type": "keyword"},
+                "standardization_schemes": {"type": "keyword"},
+                "measurement_units": {"type": "keyword"},
+                "reference_portions": {"type": "keyword"},
+                "completeness_percent": {"type": "float"},
+                "completeness_description": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "nutrient_coverage": {"type": "keyword"},
+                "data_formats": {"type": "keyword"},
+                "tasks_supported": {"type": "keyword"},
+                "number_of_entries": {"type": "integer"},
+                "min_nutrients_per_item": {"type": "integer"},
+                "max_nutrients_per_item": {"type": "integer"},
+                # ------------------------------------------------------------------
+                # Semantic embedding (optional, consistent with other entities)
+                # ------------------------------------------------------------------
                 "embedding": _embedding_field(dim),
                 "embedded_at": {
                     "type": "date",
@@ -491,6 +529,7 @@ def foodtable_index(dim: int) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Organization index (merged / canonical version)
 # ---------------------------------------------------------------------------
+
 
 def organization_index(dim: int) -> Dict[str, Any]:
     return {
@@ -547,6 +586,7 @@ def organization_index(dim: int) -> Dict[str, Any]:
 # Person index
 # ---------------------------------------------------------------------------
 
+
 def person_index(dim: int) -> Dict[str, Any]:
     return {
         "settings": DEFAULT_SETTINGS,
@@ -595,6 +635,7 @@ from typing import Any, Dict
 # assuming you already have these in your module:
 # DEFAULT_SETTINGS and _embedding_field(dim)
 
+
 def rag_chunk_index(dim: int) -> Dict[str, Any]:
     """
     Index optimized for RAG chunks.
@@ -605,13 +646,16 @@ def rag_chunk_index(dim: int) -> Dict[str, Any]:
         "mappings": {
             "properties": {
                 # Identity / linking
-                "chunk_id": {"type": "keyword"},        # unique ID for this chunk
-                "base_urn": {"type": "keyword"},        # URN of guide/article/recipe/etc.
-                "base_type": {"type": "keyword"},       # guide | article | recipe | foodtable | person | organization
-                "organization_urn": {"type": "keyword"},# optional: for org-based filters
-
+                "chunk_id": {"type": "keyword"},  # unique ID for this chunk
+                "base_urn": {"type": "keyword"},  # URN of guide/article/recipe/etc.
+                "base_type": {
+                    "type": "keyword"
+                },  # guide | article | recipe | foodtable | person | organization
+                "organization_urn": {
+                    "type": "keyword"
+                },  # optional: for org-based filters
                 # For citations
-                "title": {                               # base entity title (for display/citations)
+                "title": {  # base entity title (for display/citations)
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
@@ -620,7 +664,6 @@ def rag_chunk_index(dim: int) -> Dict[str, Any]:
                     },
                 },
                 "url": {"type": "keyword"},
-
                 # Structural anchors
                 "section": {
                     "type": "text",
@@ -629,33 +672,28 @@ def rag_chunk_index(dim: int) -> Dict[str, Any]:
                 },
                 "paragraph_start": {"type": "integer"},
                 "paragraph_end": {"type": "integer"},
-
                 # Optional content-based anchor for robustness
-                "anchor_start": {                       # first N tokens of the chunk
+                "anchor_start": {  # first N tokens of the chunk
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
-
                 # Locale filters
                 "language": {"type": "keyword"},
                 "region": {"type": "keyword"},
-
                 # Actual text used in RAG
-                "text": {                               # full chunk text fed to the LLM
+                "text": {  # full chunk text fed to the LLM
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
-                "snippet": {                            # shorter preview / UI snippet (optional)
+                "snippet": {  # shorter preview / UI snippet (optional)
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
-
                 # Embedding for semantic search
                 "embedding": _embedding_field(dim),
-
                 # Timestamps (optional but handy)
                 "created_at": {
                     "type": "date",
@@ -668,4 +706,3 @@ def rag_chunk_index(dim: int) -> Dict[str, Any]:
             }
         },
     }
-

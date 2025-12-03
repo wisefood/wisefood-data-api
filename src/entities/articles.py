@@ -140,7 +140,7 @@ class Article(Entity):
             "entity": self.name,
             "urn": urn,
             "source_index": self.collection_name,
-            "rag_index": "rag_chunk_index", 
+            "rag_index": "rag_chunks", 
             "metadata": {
                 "source": "article.embed_rag",
                 "requested_by": creator.get("preferred_username") if creator else None,

@@ -22,7 +22,7 @@ def _split_into_paragraphs(text: str) -> List[str]:
     more blank lines (two or more consecutive newlines).
 
     This keeps chunks aligned to human-readable units instead of arbitrary
-    character windows, which improves RAG legibility and highlighting.
+    character windows.
     """
     paras = re.split(r"\n{2,}", text or "")
     return [p.strip() for p in paras if p.strip()]

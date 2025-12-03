@@ -345,9 +345,13 @@ class GuideUpdateSchema(BaseModel):
 
 class ArticleSchema(BaseSchema):
     model_config = ConfigDict(
-        extra="forbid",
+        extra="ignore",
         str_strip_whitespace=True,
         use_enum_values=True,
+    )
+    embedded_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp when the article was embedded",
     )
 
     type: Literal["article"] = Field(
@@ -371,9 +375,9 @@ class ArticleSchema(BaseSchema):
         default_factory=list,
         description="List of authors",
     )
-    publication_year: Optional[int] = Field(
+    publication_year:Optional[date] = Field(
         None,
-        description="Publication year of the article (UTC)",
+        description="Publication year as integer or full date; integers normalized to YYYY-01-01",
     )
     external_id: Optional[NonEmptyStr] = Field(
         None,
@@ -470,7 +474,8 @@ class ArticleCreationSchema(BaseModel):
 
     @field_validator("publication_year", mode="before")
     @classmethod
-    def normalize_publication_year(cls, v):
+    def validate_publication_year(cls, v):
+        # here, normalize_publication_year refers to the module-level function
         return normalize_publication_year(v)
 
     @field_validator("tags")
@@ -524,7 +529,8 @@ class ArticleUpdateSchema(BaseModel):
 
     @field_validator("publication_year", mode="before")
     @classmethod
-    def normalize_publication_year(cls, v):
+    def validate_publication_year(cls, v):
+        # here, normalize_publication_year refers to the module-level function
         return normalize_publication_year(v)
 
 
@@ -535,7 +541,7 @@ class FoodCompositionTableSchema(BaseSchema):
     """
 
     model_config = ConfigDict(
-        extra="forbid",
+        extra="ignore",
         str_strip_whitespace=True,
         use_enum_values=True,
     )
@@ -765,9 +771,8 @@ class OrganizationUpdateSchema(BaseModel):
     image_url: Optional[HttpUrl] = None
 
 
-@field_validator("publication_year", mode="before")
-@classmethod
-def normalize_publication_year(cls, v):
+
+def normalize_publication_year(v):
     if v is None:
         return None
 

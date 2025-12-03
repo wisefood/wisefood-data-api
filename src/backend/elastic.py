@@ -10,6 +10,7 @@ from es_schema import (
     person_index,
     artifact_index,
     foodtable_index,
+    rag_chunk_index
 )
 from schemas import SearchSchema
 import logging
@@ -62,6 +63,7 @@ class ElasticsearchClientSingleton:
         ensure_index("organizations", organization_index(ES_DIM))
         ensure_index("persons", person_index(ES_DIM))
         ensure_index("fctables", foodtable_index(ES_DIM))
+        ensure_index("rag_chunks", rag_chunk_index(ES_DIM))
 
     # --- Simple helpers -----------------------------------------------------
 
