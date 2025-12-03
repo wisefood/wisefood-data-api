@@ -59,6 +59,9 @@ class Config:
         )
         self.settings["REDIS_HOST"] = os.getenv("REDIS_HOST", "redis")
         self.settings["REDIS_PORT"] = int(os.getenv("REDIS_PORT", 6379))
+        # Allow separating cache vs queue keyspaces if desired
+        self.settings["REDIS_DB"] = int(os.getenv("REDIS_DB", 1))
+        self.settings["REDIS_QUEUE_DB"] = int(os.getenv("REDIS_QUEUE_DB", 2))
 
 
 # Configure application settings

@@ -1,10 +1,11 @@
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from backend.redis import REDIS
+from main import config
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +21,12 @@ class EmbeddingQueue:
         queue_key: str = "embedding:queue",
         status_prefix: str = "embedding:job:",
         status_ttl_seconds: int = 60 * 60 * 24,
+        db: Optional[int] = None,
     ):
         self.queue_key = queue_key
         self.status_prefix = status_prefix
         self.status_ttl_seconds = status_ttl_seconds
+        self.db = db if db is not None else config.settings.get("REDIS_QUEUE_DB", config.settings.get("REDIS_DB", 1))
 
     def _status_key(self, job_id: str) -> str:
         return f"{self.status_prefix}{job_id}"
@@ -31,7 +34,7 @@ class EmbeddingQueue:
     def enqueue(self, job: Dict[str, Any]) -> str:
         job_id = job.get("job_id") or str(uuid.uuid4())
         job["job_id"] = job_id
-        enqueued_at = datetime.now().isoformat()
+        enqueued_at = datetime.utcnow().isoformat()
         status_doc = {
             "job_id": job_id,
             "status": "queued",
@@ -40,17 +43,17 @@ class EmbeddingQueue:
             "error": None,
         }
         # Persist status and push job to queue
-        REDIS.set(self._status_key(job_id), status_doc)
-        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds)
-        REDIS.lpush(self.queue_key, json.dumps(job))
+        REDIS.set(self._status_key(job_id), status_doc, db=self.db)
+        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds, db=self.db)
+        REDIS.lpush(self.queue_key, json.dumps(job), db=self.db)
         return job_id
 
     def get_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        return REDIS.get(self._status_key(job_id))
+        return REDIS.get(self._status_key(job_id), db=self.db)
 
     def pop(self, timeout: int = 5) -> Optional[Dict[str, Any]]:
         """Blocking pop for workers; returns a dict or None on timeout."""
-        item = REDIS.brpop(self.queue_key, timeout=timeout)
+        item = REDIS.brpop(self.queue_key, timeout=timeout, db=self.db)
         if not item:
             return None
         try:
@@ -63,8 +66,8 @@ class EmbeddingQueue:
     def mark_started(self, job_id: str):
         status = self.get_status(job_id) or {}
         status.update({"status": "processing", "started_at": datetime.utcnow().isoformat(), "updated_at": datetime.utcnow().isoformat()})
-        REDIS.set(self._status_key(job_id), status)
-        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds)
+        REDIS.set(self._status_key(job_id), status, db=self.db)
+        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds, db=self.db)
 
     def mark_completed(self, job_id: str, metadata: Optional[Dict[str, Any]] = None):
         status = self.get_status(job_id) or {}
@@ -77,8 +80,8 @@ class EmbeddingQueue:
                 "error": None,
             }
         )
-        REDIS.set(self._status_key(job_id), status)
-        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds)
+        REDIS.set(self._status_key(job_id), status, db=self.db)
+        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds, db=self.db)
 
     def mark_failed(self, job_id: str, error: str):
         status = self.get_status(job_id) or {}
@@ -90,8 +93,8 @@ class EmbeddingQueue:
                 "error": error,
             }
         )
-        REDIS.set(self._status_key(job_id), status)
-        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds)
+        REDIS.set(self._status_key(job_id), status, db=self.db)
+        REDIS.expire(self._status_key(job_id), self.status_ttl_seconds, db=self.db)
 
 
 EMBEDDING_QUEUE = EmbeddingQueue()
