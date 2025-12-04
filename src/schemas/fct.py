@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 # ENUMS
 # ============================================================
 
+
 class LangCode(str, Enum):
     EN = "en"
     FR = "fr"
@@ -51,10 +52,12 @@ class AmountType(str, Enum):
 # SOURCE & PROVENANCE
 # ============================================================
 
+
 class SourceInfo(BaseModel):
     """
     Provenance information about the data source (FCT).
     """
+
     model_config = ConfigDict(extra="allow")
 
     id: UUID = Field(default_factory=uuid4)
@@ -69,6 +72,7 @@ class SourceInfo(BaseModel):
 # ============================================================
 # FOOD IDENTITY MODELS
 # ============================================================
+
 
 class FoodIdentifier(BaseModel):
     system: str
@@ -93,6 +97,7 @@ class FoodConcept(BaseModel):
     """
     Canonical food identity representing a unique food item across FCTs.
     """
+
     id: UUID = Field(default_factory=uuid4)
     identifiers: List[FoodIdentifier] = []
     names: List[FoodName] = Field(default_factory=list)
@@ -111,10 +116,12 @@ class FoodConcept(BaseModel):
 # NUTRIENT SCHEMA
 # ============================================================
 
+
 class NutrientRef(BaseModel):
     """
     Canonical nutrient identifier with optional source mapping.
     """
+
     id: str
     name: Optional[str] = None
     unit: QuantityUnit = QuantityUnit.UNKNOWN
@@ -127,6 +134,7 @@ class NutrientAmount(BaseModel):
     """
     Nutrient value and metadata for interpretation.
     """
+
     nutrient: NutrientRef
     value: Optional[float]
     unit: QuantityUnit
@@ -142,10 +150,12 @@ class NutrientAmount(BaseModel):
 # PORTION / HOUSEHOLD MEASURES
 # ============================================================
 
+
 class PortionMeasure(BaseModel):
     """
     Represents a named portion and its mass/volume equivalent.
     """
+
     label: str
     mass_g: Optional[float] = None
     volume_ml: Optional[float] = None
@@ -156,10 +166,12 @@ class PortionMeasure(BaseModel):
 # PREPARATION & CONTEXT
 # ============================================================
 
+
 class PreparationContext(BaseModel):
     """
     Cooking, processing, and measurement context.
     """
+
     country_iso3: Optional[str] = None
     edible_portion_desc: Optional[str] = None
     cooking_method: Optional[str] = None
@@ -172,10 +184,12 @@ class PreparationContext(BaseModel):
 # QUALITY & AMBIGUITY HANDLING
 # ============================================================
 
+
 class MappingCandidate(BaseModel):
     """
     Alternative matches for food mapping with confidence score.
     """
+
     food_concept_id: UUID
     confidence: float = Field(..., ge=0, le=1)
     rationale: Optional[str] = None
@@ -191,10 +205,12 @@ class RecordQuality(BaseModel):
 # CANONICAL FOOD COMPOSITION RECORD
 # ============================================================
 
+
 class FoodCompositionRecord(BaseModel):
     """
     Canonical representation of one composition entry from any FCT.
     """
+
     model_config = ConfigDict(extra="allow")
 
     id: UUID = Field(default_factory=uuid4)
@@ -222,11 +238,13 @@ class FoodCompositionRecord(BaseModel):
 # RAW INGESTION MODEL (for importing ANY FCT)
 # ============================================================
 
+
 class RawFCTEntry(BaseModel):
     """
     Raw entry as received from any Food Composition Table.
     The mapping layer converts this into a FoodCompositionRecord.
     """
+
     source: SourceInfo
     payload: Dict[str, Any] = Field(
         ..., description="Arbitrary key/value pairs from the source FCT row."
