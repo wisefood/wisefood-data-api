@@ -383,6 +383,10 @@ class ArticleSchema(BaseSchema):
         None,
         description="External identifier (e.g., DOI, PubMed ID, Semantic Scholar ID)",
     )
+    doi: Optional[NonEmptyStr] = Field(
+        None,
+        description="Digital Object Identifier (DOI)",
+    )
     content: str = Field(
         ...,
         description="Full text content of the article",
@@ -433,7 +437,11 @@ class ArticleCreationSchema(BaseModel):
     )
     external_id: Optional[NonEmptyStr] = Field(
         None,
-        description="External identifier (e.g., DOI, PubMed ID, Semantic Scholar ID)",
+        description="External identifier (e.g., PubMed ID, Semantic Scholar ID)",
+    )
+    doi: Optional[NonEmptyStr] = Field(
+        None,
+        description="Digital Object Identifier (DOI)",
     )
     license: Optional[LicenseId] = Field(
         None,
@@ -501,7 +509,14 @@ class ArticleUpdateSchema(BaseModel):
     title: Optional[NonEmptyStr] = None
     description: Optional[NonEmptyStr] = None
     tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] | None = None
-    external_id: Optional[NonEmptyStr] = None
+    external_id: Optional[NonEmptyStr] = Field(
+        None,
+        description="External identifier (e.g., PubMed ID, Semantic Scholar ID)",
+    )
+    doi: Optional[NonEmptyStr] = Field(
+        None,
+        description="Digital Object Identifier (DOI)",
+    )
     url: Optional[HttpUrl] = None
     license: Optional[LicenseId] = None
     abstract: Optional[NonEmptyAbstract] = None
