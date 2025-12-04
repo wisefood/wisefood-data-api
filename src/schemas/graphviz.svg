@@ -1,0 +1,286 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2146pt" height="382pt" viewBox="0.00 0.00 2146.00 382.00">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 378)">
+<title>FCTSchema</title>
+<polygon fill="white" stroke="none" points="-4,4 -4,-378 2141.59,-378 2141.59,4 -4,4"/>
+<!-- FoodCompositionRecord -->
+<g id="node1" class="node">
+<title>FoodCompositionRecord</title>
+<polygon fill="none" stroke="black" points="0,-165.5 0,-201.5 601.31,-201.5 601.31,-165.5 0,-165.5"/>
+<text xml:space="preserve" text-anchor="middle" x="58.56" y="-180.5" font-family="Times,serif" font-size="10.00">FoodCompositionRecord</text>
+<polyline fill="none" stroke="black" points="117.11,-165.5 117.11,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="144.14" y="-180.5" font-family="Times,serif" font-size="10.00">id: UUID</text>
+<polyline fill="none" stroke="black" points="171.17,-165.5 171.17,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="218.74" y="-180.5" font-family="Times,serif" font-size="10.00">source_row_id: str?</text>
+<polyline fill="none" stroke="black" points="266.31,-165.5 266.31,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="309.72" y="-180.5" font-family="Times,serif" font-size="10.00">basis: ValueBasis</text>
+<polyline fill="none" stroke="black" points="353.14,-165.5 353.14,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="392.38" y="-180.5" font-family="Times,serif" font-size="10.00">fingerprint: str?</text>
+<polyline fill="none" stroke="black" points="431.62,-165.5 431.62,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="473.34" y="-180.5" font-family="Times,serif" font-size="10.00">created_at: date?</text>
+<polyline fill="none" stroke="black" points="515.07,-165.5 515.07,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="558.19" y="-180.5" font-family="Times,serif" font-size="10.00">updated_at: date?</text>
+</g>
+<!-- SourceInfo -->
+<g id="node2" class="node">
+<title>SourceInfo</title>
+<polygon fill="none" stroke="black" points="840.26,-335.5 840.26,-371.5 1387.3,-371.5 1387.3,-335.5 840.26,-335.5"/>
+<text xml:space="preserve" text-anchor="middle" x="870.47" y="-350.5" font-family="Times,serif" font-size="10.00">SourceInfo</text>
+<polyline fill="none" stroke="black" points="900.69,-335.5 900.69,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="927.71" y="-350.5" font-family="Times,serif" font-size="10.00">id: UUID</text>
+<polyline fill="none" stroke="black" points="954.74,-335.5 954.74,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="981.2" y="-350.5" font-family="Times,serif" font-size="10.00">name: str</text>
+<polyline fill="none" stroke="black" points="1007.67,-335.5 1007.67,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1043.02" y="-350.5" font-family="Times,serif" font-size="10.00">acronym: str?</text>
+<polyline fill="none" stroke="black" points="1078.37,-335.5 1078.37,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1122.34" y="-350.5" font-family="Times,serif" font-size="10.00">country_iso3: str?</text>
+<polyline fill="none" stroke="black" points="1166.31,-335.5 1166.31,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1198.88" y="-350.5" font-family="Times,serif" font-size="10.00">version: str?</text>
+<polyline fill="none" stroke="black" points="1231.46,-335.5 1231.46,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1254.87" y="-350.5" font-family="Times,serif" font-size="10.00">url: str?</text>
+<polyline fill="none" stroke="black" points="1278.29,-335.5 1278.29,-371.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1332.8" y="-350.5" font-family="Times,serif" font-size="10.00">publication_date: date?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;SourceInfo -->
+<g id="edge1" class="edge">
+<title>FoodCompositionRecord-&gt;SourceInfo</title>
+<path fill="none" stroke="black" d="M343.37,-201.96C414.79,-232.65 565.78,-293.55 699.92,-321.5 741.19,-330.1 785.22,-336.44 828.58,-341.1"/>
+<polygon fill="black" stroke="black" points="828.07,-344.57 838.38,-342.13 828.8,-337.61 828.07,-344.57"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-320.83" font-family="Times,serif" font-size="14.00"> 1 → 1 </text>
+</g>
+<!-- FoodConcept -->
+<g id="node3" class="node">
+<title>FoodConcept</title>
+<polygon fill="none" stroke="black" points="1002.3,-275.5 1002.3,-311.5 1225.26,-311.5 1225.26,-275.5 1002.3,-275.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1037.24" y="-290.5" font-family="Times,serif" font-size="10.00">FoodConcept</text>
+<polyline fill="none" stroke="black" points="1072.19,-275.5 1072.19,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1099.21" y="-290.5" font-family="Times,serif" font-size="10.00">id: UUID</text>
+<polyline fill="none" stroke="black" points="1126.24,-275.5 1126.24,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1175.75" y="-290.5" font-family="Times,serif" font-size="10.00">scientific_name: str?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;FoodConcept -->
+<g id="edge2" class="edge">
+<title>FoodCompositionRecord-&gt;FoodConcept</title>
+<path fill="none" stroke="black" d="M374.89,-201.98C454.38,-221.29 585.32,-250.89 699.92,-266.5 797.12,-279.74 908.12,-286.54 990.53,-290"/>
+<polygon fill="black" stroke="black" points="990.31,-293.49 1000.45,-290.4 990.6,-286.5 990.31,-293.49"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-267.61" font-family="Times,serif" font-size="14.00"> 1 → 1 </text>
+</g>
+<!-- PreparationContext -->
+<g id="node7" class="node">
+<title>PreparationContext</title>
+<polygon fill="none" stroke="black" points="781.45,-220.5 781.45,-256.5 1446.11,-256.5 1446.11,-220.5 781.45,-220.5"/>
+<text xml:space="preserve" text-anchor="middle" x="828.33" y="-235.5" font-family="Times,serif" font-size="10.00">PreparationContext</text>
+<polyline fill="none" stroke="black" points="875.21,-220.5 875.21,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="919.18" y="-235.5" font-family="Times,serif" font-size="10.00">country_iso3: str?</text>
+<polyline fill="none" stroke="black" points="963.15,-220.5 963.15,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1021.55" y="-235.5" font-family="Times,serif" font-size="10.00">edible_portion_desc: str?</text>
+<polyline fill="none" stroke="black" points="1079.95,-220.5 1079.95,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1131.42" y="-235.5" font-family="Times,serif" font-size="10.00">cooking_method: str?</text>
+<polyline fill="none" stroke="black" points="1182.88,-220.5 1182.88,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1222.12" y="-235.5" font-family="Times,serif" font-size="10.00">processing: str?</text>
+<polyline fill="none" stroke="black" points="1261.37,-220.5 1261.37,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1319.77" y="-235.5" font-family="Times,serif" font-size="10.00">moisture_adjusted: bool?</text>
+<polyline fill="none" stroke="black" points="1378.18,-220.5 1378.18,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1412.14" y="-235.5" font-family="Times,serif" font-size="10.00">remarks: str?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;PreparationContext -->
+<g id="edge3" class="edge">
+<title>FoodCompositionRecord-&gt;PreparationContext</title>
+<path fill="none" stroke="black" d="M561.93,-201.98C607.9,-205.19 655.31,-208.47 699.92,-211.5 737.5,-214.05 777.02,-216.69 816.09,-219.27"/>
+<polygon fill="black" stroke="black" points="815.65,-222.75 825.86,-219.92 816.11,-215.77 815.65,-222.75"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-214.24" font-family="Times,serif" font-size="14.00"> 1 → 1 </text>
+</g>
+<!-- NutrientAmount -->
+<g id="node8" class="node">
+<title>NutrientAmount</title>
+<polygon fill="none" stroke="black" points="699.92,-165.5 699.92,-201.5 1527.65,-201.5 1527.65,-165.5 699.92,-165.5"/>
+<text xml:space="preserve" text-anchor="middle" x="740.97" y="-180.5" font-family="Times,serif" font-size="10.00">NutrientAmount</text>
+<polyline fill="none" stroke="black" points="782.02,-165.5 782.02,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="814.87" y="-180.5" font-family="Times,serif" font-size="10.00">value: float?</text>
+<polyline fill="none" stroke="black" points="847.72,-165.5 847.72,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="892.52" y="-180.5" font-family="Times,serif" font-size="10.00">unit: QuantityUnit</text>
+<polyline fill="none" stroke="black" points="937.32,-165.5 937.32,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="980.74" y="-180.5" font-family="Times,serif" font-size="10.00">basis: ValueBasis</text>
+<polyline fill="none" stroke="black" points="1024.15,-165.5 1024.15,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1087.56" y="-180.5" font-family="Times,serif" font-size="10.00">amount_type: AmountType</text>
+<polyline fill="none" stroke="black" points="1150.96,-165.5 1150.96,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1207.7" y="-180.5" font-family="Times,serif" font-size="10.00">original_value_raw: str?</text>
+<polyline fill="none" stroke="black" points="1264.43,-165.5 1264.43,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1304.5" y="-180.5" font-family="Times,serif" font-size="10.00">std_error: float?</text>
+<polyline fill="none" stroke="black" points="1344.57,-165.5 1344.57,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1383.82" y="-180.5" font-family="Times,serif" font-size="10.00">n_samples: int?</text>
+<polyline fill="none" stroke="black" points="1423.06,-165.5 1423.06,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1475.35" y="-180.5" font-family="Times,serif" font-size="10.00">detection_limit: float?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;NutrientAmount -->
+<g id="edge4" class="edge">
+<title>FoodCompositionRecord-&gt;NutrientAmount</title>
+<path fill="none" stroke="black" d="M601.67,-183.5C630.08,-183.5 659.22,-183.5 688.5,-183.5"/>
+<polygon fill="black" stroke="black" points="688.21,-187 698.21,-183.5 688.21,-180 688.21,-187"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-187.7" font-family="Times,serif" font-size="14.00"> 1 → many </text>
+</g>
+<!-- PortionMeasure -->
+<g id="node10" class="node">
+<title>PortionMeasure</title>
+<polygon fill="none" stroke="black" points="926.59,-110.5 926.59,-146.5 1300.97,-146.5 1300.97,-110.5 926.59,-110.5"/>
+<text xml:space="preserve" text-anchor="middle" x="966.53" y="-125.5" font-family="Times,serif" font-size="10.00">PortionMeasure</text>
+<polyline fill="none" stroke="black" points="1006.47,-110.5 1006.47,-146.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1031.83" y="-125.5" font-family="Times,serif" font-size="10.00">label: str</text>
+<polyline fill="none" stroke="black" points="1057.18,-110.5 1057.18,-146.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1094.2" y="-125.5" font-family="Times,serif" font-size="10.00">mass_g: float?</text>
+<polyline fill="none" stroke="black" points="1131.22,-110.5 1131.22,-146.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1176.02" y="-125.5" font-family="Times,serif" font-size="10.00">volume_ml: float?</text>
+<polyline fill="none" stroke="black" points="1220.82,-110.5 1220.82,-146.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1260.89" y="-125.5" font-family="Times,serif" font-size="10.00">description: str?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;PortionMeasure -->
+<g id="edge5" class="edge">
+<title>FoodCompositionRecord-&gt;PortionMeasure</title>
+<path fill="none" stroke="black" d="M574.29,-165.01C685.83,-157.45 812.47,-148.86 914.9,-141.92"/>
+<polygon fill="black" stroke="black" points="915.06,-145.41 924.8,-141.25 914.59,-138.43 915.06,-145.41"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-165.13" font-family="Times,serif" font-size="14.00"> 1 → many </text>
+</g>
+<!-- RecordQuality -->
+<g id="node11" class="node">
+<title>RecordQuality</title>
+<polygon fill="none" stroke="black" points="937.24,-55.5 937.24,-91.5 1290.32,-91.5 1290.32,-55.5 937.24,-55.5"/>
+<text xml:space="preserve" text-anchor="middle" x="974.68" y="-70.5" font-family="Times,serif" font-size="10.00">RecordQuality</text>
+<polyline fill="none" stroke="black" points="1012.11,-55.5 1012.11,-91.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1074.12" y="-70.5" font-family="Times,serif" font-size="10.00">completeness_score: float?</text>
+<polyline fill="none" stroke="black" points="1136.13,-55.5 1136.13,-91.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1184.81" y="-70.5" font-family="Times,serif" font-size="10.00">source_priority: int?</text>
+<polyline fill="none" stroke="black" points="1233.49,-55.5 1233.49,-91.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1261.91" y="-70.5" font-family="Times,serif" font-size="10.00">notes: str?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;RecordQuality -->
+<g id="edge6" class="edge">
+<title>FoodCompositionRecord-&gt;RecordQuality</title>
+<path fill="none" stroke="black" d="M376.01,-165.05C455.62,-146.03 585.9,-117.03 699.92,-101.5 773.4,-91.49 854.75,-85 925.68,-80.82"/>
+<polygon fill="black" stroke="black" points="925.67,-84.33 935.46,-80.25 925.27,-77.34 925.67,-84.33"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-117.65" font-family="Times,serif" font-size="14.00"> 1 → 1? </text>
+</g>
+<!-- MappingCandidate -->
+<g id="node12" class="node">
+<title>MappingCandidate</title>
+<polygon fill="none" stroke="black" points="933.64,-0.5 933.64,-36.5 1293.92,-36.5 1293.92,-0.5 933.64,-0.5"/>
+<text xml:space="preserve" text-anchor="middle" x="979.96" y="-15.5" font-family="Times,serif" font-size="10.00">MappingCandidate</text>
+<polyline fill="none" stroke="black" points="1026.29,-0.5 1026.29,-36.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1083.02" y="-15.5" font-family="Times,serif" font-size="10.00">food_concept_id: UUID</text>
+<polyline fill="none" stroke="black" points="1139.76,-0.5 1139.76,-36.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1181.49" y="-15.5" font-family="Times,serif" font-size="10.00">confidence: float</text>
+<polyline fill="none" stroke="black" points="1223.23,-0.5 1223.23,-36.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1258.58" y="-15.5" font-family="Times,serif" font-size="10.00">rationale: str?</text>
+</g>
+<!-- FoodCompositionRecord&#45;&gt;MappingCandidate -->
+<g id="edge7" class="edge">
+<title>FoodCompositionRecord-&gt;MappingCandidate</title>
+<path fill="none" stroke="black" d="M343.36,-165.04C414.76,-134.37 565.72,-73.64 699.92,-46.5 771.69,-31.99 851.75,-24.59 922.13,-20.95"/>
+<polygon fill="black" stroke="black" points="922.01,-24.46 931.83,-20.47 921.67,-17.47 922.01,-24.46"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-69.53" font-family="Times,serif" font-size="14.00"> 1 → many </text>
+</g>
+<!-- FoodIdentifier -->
+<g id="node4" class="node">
+<title>FoodIdentifier</title>
+<polygon fill="none" stroke="black" points="1767.02,-330.5 1767.02,-366.5 1996.82,-366.5 1996.82,-330.5 1767.02,-330.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1803.9" y="-345.5" font-family="Times,serif" font-size="10.00">FoodIdentifier</text>
+<polyline fill="none" stroke="black" points="1840.79,-330.5 1840.79,-366.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1870.31" y="-345.5" font-family="Times,serif" font-size="10.00">system: str</text>
+<polyline fill="none" stroke="black" points="1899.84,-330.5 1899.84,-366.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1924.92" y="-345.5" font-family="Times,serif" font-size="10.00">code: str</text>
+<polyline fill="none" stroke="black" points="1950,-330.5 1950,-366.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1973.41" y="-345.5" font-family="Times,serif" font-size="10.00">uri: str?</text>
+</g>
+<!-- FoodConcept&#45;&gt;FoodIdentifier -->
+<g id="edge8" class="edge">
+<title>FoodConcept-&gt;FoodIdentifier</title>
+<path fill="none" stroke="black" d="M1225.37,-301.44C1365.91,-311.53 1607.92,-328.9 1755.3,-339.48"/>
+<polygon fill="black" stroke="black" points="1754.88,-342.96 1765.11,-340.19 1755.38,-335.98 1754.88,-342.96"/>
+<text xml:space="preserve" text-anchor="middle" x="1576.95" y="-331.74" font-family="Times,serif" font-size="14.00"> 1 → many </text>
+</g>
+<!-- FoodName -->
+<g id="node5" class="node">
+<title>FoodName</title>
+<polygon fill="none" stroke="black" points="1641.86,-275.5 1641.86,-311.5 2121.98,-311.5 2121.98,-275.5 1641.86,-275.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1672.08" y="-290.5" font-family="Times,serif" font-size="10.00">FoodName</text>
+<polyline fill="none" stroke="black" points="1702.3,-275.5 1702.3,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1728.77" y="-290.5" font-family="Times,serif" font-size="10.00">name: str</text>
+<polyline fill="none" stroke="black" points="1755.23,-275.5 1755.23,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1781.7" y="-290.5" font-family="Times,serif" font-size="10.00">lang: str?</text>
+<polyline fill="none" stroke="black" points="1808.17,-275.5 1808.17,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1849.36" y="-290.5" font-family="Times,serif" font-size="10.00">is_primary: bool</text>
+<polyline fill="none" stroke="black" points="1890.55,-275.5 1890.55,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1941.45" y="-290.5" font-family="Times,serif" font-size="10.00">name_type: scientific</text>
+<polyline fill="none" stroke="black" points="1992.35,-275.5 1992.35,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2017.85" y="-290.5" font-family="Times,serif" font-size="10.00">common</text>
+<polyline fill="none" stroke="black" points="2043.34,-275.5 2043.34,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2061.06" y="-290.5" font-family="Times,serif" font-size="10.00">local</text>
+<polyline fill="none" stroke="black" points="2078.78,-275.5 2078.78,-311.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2100.38" y="-290.5" font-family="Times,serif" font-size="10.00">brand?</text>
+</g>
+<!-- FoodConcept&#45;&gt;FoodName -->
+<g id="edge9" class="edge">
+<title>FoodConcept-&gt;FoodName</title>
+<path fill="none" stroke="black" d="M1225.37,-293.5C1330.77,-293.5 1493.23,-293.5 1630.05,-293.5"/>
+<polygon fill="black" stroke="black" points="1630.01,-297 1640.01,-293.5 1630.01,-290 1630.01,-297"/>
+<text xml:space="preserve" text-anchor="middle" x="1576.95" y="-297.7" font-family="Times,serif" font-size="14.00"> 1 → many </text>
+</g>
+<!-- FoodGroupRef -->
+<g id="node6" class="node">
+<title>FoodGroupRef</title>
+<polygon fill="none" stroke="black" points="1757.03,-220.5 1757.03,-256.5 2006.82,-256.5 2006.82,-220.5 1757.03,-220.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1795.3" y="-235.5" font-family="Times,serif" font-size="10.00">FoodGroupRef</text>
+<polyline fill="none" stroke="black" points="1833.58,-220.5 1833.58,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1865.33" y="-235.5" font-family="Times,serif" font-size="10.00">system: str?</text>
+<polyline fill="none" stroke="black" points="1897.07,-220.5 1897.07,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1924.37" y="-235.5" font-family="Times,serif" font-size="10.00">code: str?</text>
+<polyline fill="none" stroke="black" points="1951.67,-220.5 1951.67,-256.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1979.24" y="-235.5" font-family="Times,serif" font-size="10.00">label: str?</text>
+</g>
+<!-- FoodConcept&#45;&gt;FoodGroupRef -->
+<g id="edge10" class="edge">
+<title>FoodConcept-&gt;FoodGroupRef</title>
+<path fill="none" stroke="black" d="M1225.64,-286.67C1308.78,-281.44 1425.37,-273.9 1527.65,-266.5 1599.58,-261.3 1679.7,-254.99 1745.44,-249.68"/>
+<polygon fill="black" stroke="black" points="1745.5,-253.18 1755.19,-248.89 1744.94,-246.21 1745.5,-253.18"/>
+<text xml:space="preserve" text-anchor="middle" x="1576.95" y="-269.31" font-family="Times,serif" font-size="14.00"> 1 → 1? </text>
+</g>
+<!-- NutrientRef -->
+<g id="node9" class="node">
+<title>NutrientRef</title>
+<polygon fill="none" stroke="black" points="1626.25,-165.5 1626.25,-201.5 2137.59,-201.5 2137.59,-165.5 1626.25,-165.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1658.13" y="-180.5" font-family="Times,serif" font-size="10.00">NutrientRef</text>
+<polyline fill="none" stroke="black" points="1690.01,-165.5 1690.01,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1709.54" y="-180.5" font-family="Times,serif" font-size="10.00">id: str</text>
+<polyline fill="none" stroke="black" points="1729.07,-165.5 1729.07,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1757.76" y="-180.5" font-family="Times,serif" font-size="10.00">name: str?</text>
+<polyline fill="none" stroke="black" points="1786.44,-165.5 1786.44,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1831.25" y="-180.5" font-family="Times,serif" font-size="10.00">unit: QuantityUnit</text>
+<polyline fill="none" stroke="black" points="1876.05,-165.5 1876.05,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="1918.9" y="-180.5" font-family="Times,serif" font-size="10.00">source_code: str?</text>
+<polyline fill="none" stroke="black" points="1961.74,-165.5 1961.74,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2005.98" y="-180.5" font-family="Times,serif" font-size="10.00">source_name: str?</text>
+<polyline fill="none" stroke="black" points="2050.21,-165.5 2050.21,-201.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2093.9" y="-180.5" font-family="Times,serif" font-size="10.00">ontology_uri: str?</text>
+</g>
+<!-- NutrientAmount&#45;&gt;NutrientRef -->
+<g id="edge11" class="edge">
+<title>NutrientAmount-&gt;NutrientRef</title>
+<path fill="none" stroke="black" d="M1528.12,-183.5C1557.45,-183.5 1586.54,-183.5 1614.69,-183.5"/>
+<polygon fill="black" stroke="black" points="1614.34,-187 1624.34,-183.5 1614.34,-180 1614.34,-187"/>
+<text xml:space="preserve" text-anchor="middle" x="1576.95" y="-187.7" font-family="Times,serif" font-size="14.00"> 1 → 1 </text>
+</g>
+<!-- RawFCTEntry -->
+<g id="node13" class="node">
+<title>RawFCTEntry</title>
+<polygon fill="none" stroke="black" points="209.81,-337.5 209.81,-373.5 391.5,-373.5 391.5,-337.5 209.81,-337.5"/>
+<text xml:space="preserve" text-anchor="middle" x="247.25" y="-352.5" font-family="Times,serif" font-size="10.00">RawFCTEntry</text>
+<polyline fill="none" stroke="black" points="284.69,-337.5 284.69,-373.5"/>
+<text xml:space="preserve" text-anchor="middle" x="338.1" y="-352.5" font-family="Times,serif" font-size="10.00">payload: dict[str, Any]</text>
+</g>
+<!-- RawFCTEntry&#45;&gt;SourceInfo -->
+<g id="edge12" class="edge">
+<title>RawFCTEntry-&gt;SourceInfo</title>
+<path fill="none" stroke="black" d="M391.95,-355.28C496.99,-355.02 675.6,-354.58 828.73,-354.2"/>
+<polygon fill="black" stroke="black" points="828.68,-357.7 838.67,-354.18 828.66,-350.7 828.68,-357.7"/>
+<text xml:space="preserve" text-anchor="middle" x="650.61" y="-358.88" font-family="Times,serif" font-size="14.00"> 1 → 1 </text>
+</g>
+</g>
+</svg>
