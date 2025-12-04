@@ -9,7 +9,7 @@ from es_schema import (
     organization_index,
     person_index,
     artifact_index,
-    foodtable_index,
+    fctable_index,
     rag_chunk_index
 )
 from schemas import SearchSchema
@@ -62,7 +62,7 @@ class ElasticsearchClientSingleton:
         ensure_index("articles", article_index(ES_DIM))
         ensure_index("organizations", organization_index(ES_DIM))
         ensure_index("persons", person_index(ES_DIM))
-        ensure_index("fctables", foodtable_index(ES_DIM))
+        ensure_index("fctables", fctable_index(ES_DIM))
         ensure_index("rag_chunks", rag_chunk_index(ES_DIM))
 
     # --- Simple helpers -----------------------------------------------------
