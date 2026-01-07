@@ -1,20 +1,24 @@
-from fastapi import APIRouter, Request, Depends 
+from fastapi import APIRouter, Request, Depends
 from routers.generic import render
 from auth import auth
-from schemas import LoginSchema
+from schemas import LoginSchema, MTMSchema
 import kutils
 from exceptions import AuthenticationError
+
 router = APIRouter(prefix="/api/v1/system", tags=["System Operations"])
+
 
 @router.get("/ping")
 @render()
 def ping(request: Request):
     return "pong"
 
+
 @router.get("/info")
 @render()
 def info(request: Request):
     from main import config
+
     return {
         "service": "WiseFood Data Catalog API",
         "version": "0.0.1",
@@ -22,7 +26,17 @@ def info(request: Request):
         "keycloak": config.settings["KEYCLOAK_EXT_URL"],
         "minio": config.settings["MINIO_EXT_URL_CONSOLE"],
     }
+
+
 @router.post("/login")
 @render()
 def login(request: Request, creds: LoginSchema):
     return kutils.get_token(username=creds.username, password=creds.password)
+
+
+@router.post("/mtm")
+@render()
+def login(request: Request, creds: MTMSchema):
+    return kutils.get_client_token(
+        client_id=creds.client_id, client_secret=creds.client_secret
+    )

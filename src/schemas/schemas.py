@@ -46,6 +46,9 @@ class LoginSchema(BaseModel):
     username: str = Field(..., description="Username or email")
     password: str = Field(..., description="Password")
 
+class MTMSchema(BaseModel):
+    client_id: str = Field(..., description="Client ID")
+    client_secret: str = Field(..., description="Client Secret")
 
 class SearchSchema(BaseModel):
     q: Optional[str] = Field(default=None, description="Search query string")
