@@ -9,6 +9,7 @@ The specific implementation of these operations is left to the subclasses.
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from backend.redis import REDIS
+from backend.embedding_queue import EMBEDDING_QUEUE
 from backend.elastic import ELASTIC_CLIENT
 from datetime import datetime
 from schemas import SearchSchema
@@ -24,6 +25,7 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
 
 class Entity:
     """
@@ -166,7 +168,7 @@ class Entity:
         elif entity_type == "fctable":
             if ELASTIC_CLIENT.get_entity(index_name="fctables", urn=urn) is None:
                 raise NotFoundError(f"Food Composition Table with URN {urn} not found.")
-            
+
     def get_identifier(self, identifier: str) -> str:
         """
         Get the URN of an entity given its URN or UUID.
@@ -194,7 +196,7 @@ class Entity:
                 REDIS.set(urn, obj)
             except Exception as e:
                 logging.error(f"Failed to cache entity {urn}: {e}")
-    
+
     def invalidate_cache(self, urn: str) -> None:
         """
         Invalidate the cache for the entity.
@@ -283,6 +285,32 @@ class Entity:
             "Subclasses of the Entity class must implement this method."
         )
 
+    def embed_entity(self, spec: Dict[str, Any], creator: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """
+        Enqueue an embedding job for an entity; returns immediately with job info.
+
+        :param spec: The data for the entity to embed.
+        :param creator: The requesting user (if available) for audit metadata.
+        :return: A dict containing job metadata.
+        """
+        identifier = self.get_identifier(spec.get("urn", spec.get("id")))
+        job_payload = self.embed(identifier, spec, creator)
+        job_id = EMBEDDING_QUEUE.enqueue(job_payload)
+        return {"urn": identifier, "job_id": job_id, "status": "queued"}
+
+    def embed(self, urn: str, spec: Dict[str, Any], creator: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """
+        Build an embedding job payload for the given entity.
+
+        :param urn: The URN of the entity to embed.
+        :param spec: The validated data for embedding.
+        :param creator: The requesting user (if available).
+        :return: A job payload dict.
+        """
+        raise NotImplementedError(
+            "Subclasses of the Entity class must implement this method."
+        )
+
     def delete_entity(self, urn: str) -> bool:
         """
         Delete an entity by its URN or UUID bundler method.
@@ -361,14 +389,13 @@ class Entity:
         :return: A list of entities matching the search query.
         """
         try:
-            qspec = SearchSchema.model_validate(query).model_dump(mode="json")
+            qspec = SearchSchema.model_validate(query)
         except Exception as e:
             raise DataError(f"Invalid search query: {e}")
 
         return ELASTIC_CLIENT.search_entities(
             index_name=self.collection_name, qspec=qspec
         )
-
 
     def upsert_system_fields(self, spec: Dict, update=False) -> Dict[str, Any]:
         """
@@ -395,6 +422,476 @@ class Entity:
 
 
 """
+VersionedEntity
+------------------
+Base class for entities that are *versioned*, i.e. they maintain
+a history of changes over time.
+
+A VersionedEntity:
+- Uses the normal Entity index for the "current" resource.
+- Uses a separate *versions* index to store historical versions.
+- Supports:
+  - creating versions (with user-provided OR auto-generated version labels),
+  - listing all versions for a parent,
+  - fetching a specific version,
+  - fetching the latest version,
+  - updating / soft-deleting versions.
+"""
+
+from typing import Optional, List, Dict, Any, Callable
+from datetime import datetime
+import uuid
+import logging
+
+from pydantic import BaseModel
+
+from backend.elastic import ELASTIC_CLIENT
+from backend.redis import REDIS
+from main import config
+from utils import is_valid_uuid
+from exceptions import DataError, NotFoundError, NotAllowedError
+
+logger = logging.getLogger(__name__)
+
+
+class VersionedEntity(Entity):
+    """
+    Base class for versioned entities.
+
+    This keeps version handling generic and reusable across all entities.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        collection_name: str,
+        dump_schema: BaseModel,
+        creation_schema: BaseModel,
+        update_schema: Optional[BaseModel],
+        *,
+        # Version-related wiring
+        version_collection_name: str,
+        version_dump_schema: BaseModel,
+        version_creation_schema: BaseModel,
+        version_update_schema: Optional[BaseModel],
+        version_entity_name: str = "entity_version",
+        version_field: str = "version_label",
+        auto_version_generator: Optional[Callable[[str], str]] = None,
+    ):
+        """
+        :param name: Name of the primary entity (e.g. 'guide').
+        :param collection_name: Index name for primary entities (e.g. 'guides').
+        :param dump_schema: Pydantic schema for primary entity responses.
+        :param creation_schema: Pydantic schema for primary entity creation.
+        :param update_schema: Pydantic schema for primary entity updates.
+        :param version_collection_name: Index name for versions (e.g. 'entity_versions').
+        :param version_dump_schema: Pydantic schema for version responses.
+        :param version_creation_schema: Pydantic schema for version creation.
+        :param version_update_schema: Pydantic schema for version updates.
+        :param version_entity_name: Logical name for versions (used in URNs, e.g. 'entity_version').
+        :param version_field: Field name in version docs holding the version label (e.g. 'version_label').
+        :param auto_version_generator: Optional callable(parent_urn) -> version_label for auto versioning.
+        """
+        super().__init__(
+            name, collection_name, dump_schema, creation_schema, update_schema
+        )
+
+        self.version_collection_name = version_collection_name
+        self.version_dump_schema = version_dump_schema
+        self.version_creation_schema = version_creation_schema
+        self.version_update_schema = version_update_schema
+        self.version_entity_name = version_entity_name
+        self.version_field = version_field
+        self.auto_version_generator = auto_version_generator
+
+    # ------------------------------------------------------------------
+    # Version identifier helpers
+    # ------------------------------------------------------------------
+
+    def _version_get_identifier(self, identifier: str) -> str:
+        """
+        Resolve the identifier for a version document.
+
+        Accepts either:
+        - UUID (id)
+        - full URN: 'urn:<version_entity_name>:<slug>'
+        - slug: '<slug>'  -> mapped to 'urn:<version_entity_name>:<slug>'
+        """
+        if is_valid_uuid(identifier):
+            # For versions we always store and query by id when UUID is used.
+            return identifier
+
+        if identifier.startswith(f"urn:{self.version_entity_name}:"):
+            return identifier
+
+        # Treat as URN slug
+        return f"urn:{self.version_entity_name}:{identifier}"
+
+    # ------------------------------------------------------------------
+    # Version system fields upsert
+    # ------------------------------------------------------------------
+
+    def upsert_version_system_fields(
+        self, spec: Dict[str, Any], update: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Upsert system fields for a version document:
+        - urn
+        - id
+        - created_at / updated_at
+        - status (optional)
+        """
+        # URN + UUID
+        if "urn" in spec and not update:
+            spec["urn"] = f"urn:{self.version_entity_name}:{spec['urn'].split(':')[-1]}"
+            spec["id"] = str(uuid.uuid4())
+
+        if update and "creator" in spec:
+            spec.pop("creator", None)
+
+        # Timestamps
+        spec["updated_at"] = datetime.now().isoformat()
+        if not update:
+            spec["created_at"] = datetime.now().isoformat()
+
+        # Default status if missing
+        if not update and "status" not in spec:
+            spec["status"] = "active"
+
+        return spec
+
+    # ------------------------------------------------------------------
+    # Version label generation
+    # ------------------------------------------------------------------
+
+    def generate_next_version_label(self, parent_urn: str) -> str:
+        """
+        Default auto-versioning strategy when no user-provided version is given.
+
+        Strategy:
+        - Look up all existing versions for this parent.
+        - Collect numeric version labels convertible to float.
+        - Return max + 1.0 as string.
+        - If nothing found, return '1.0'.
+
+        Subclasses can override or pass a custom `auto_version_generator`
+        in the constructor for different schemes (dates, semver, etc.).
+        """
+        if self.auto_version_generator:
+            return self.auto_version_generator(parent_urn)
+
+        try:
+            qspec = {
+                "fq": [f"parent_urn:{parent_urn}"],
+                "size": 1000,
+                "offset": 0,
+            }
+            result = ELASTIC_CLIENT.search_entities(
+                index_name=self.version_collection_name,
+                qspec=qspec,
+            )
+            # Depending on your ES wrapper, this may be:
+            # - a bare list, or
+            # - a dict with "results" key
+            if isinstance(result, dict) and "results" in result:
+                hits = result["results"]
+            else:
+                hits = result
+        except Exception as e:
+            logger.error(
+                f"Failed to load versions for auto versioning of {parent_urn}: {e}"
+            )
+            hits = []
+
+        values = []
+        for doc in hits:
+            label = doc.get(self.version_field)
+            if label is None:
+                continue
+            try:
+                values.append(float(label))
+            except Exception:
+                continue
+
+        if not values:
+            return "1.0"
+
+        return str(max(values) + 1.0)
+
+    # ------------------------------------------------------------------
+    # Version CRUD
+    # ------------------------------------------------------------------
+
+    def create_version(
+        self, parent_urn: str, spec: Dict[str, Any], creator: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create a new version document for the given parent entity.
+
+        - Ensures parent exists.
+        - Fills in parent_urn / parent_type.
+        - Validates payload with version_creation_schema.
+        - Auto-generates version label if missing.
+        - Writes to the versions index.
+        - Returns the created version (dump_schema validated).
+        """
+        # Check that parent exists
+        self.validate_existence(parent_urn)
+
+        # Ensure parent_urn is present in spec (schema probably has it too)
+        spec.setdefault("parent_urn", parent_urn)
+        spec.setdefault("parent_type", self.name)
+
+        # Auto-generate version label if missing
+        if self.version_field not in spec or not spec[self.version_field]:
+            spec[self.version_field] = self.generate_next_version_label(parent_urn)
+
+        # Validate spec via schema
+        try:
+            data = self.version_creation_schema.model_validate(spec).model_dump(
+                mode="json"
+            )
+        except Exception as e:
+            raise DataError(f"Invalid version spec: {e}")
+
+        # Attach creator if your version schema has it
+        if "creator" not in data and creator:
+            # Adjust field according to your auth claims
+            data["creator"] = (
+                creator.get("sub") or creator.get("id") or creator.get("email")
+            )
+
+        # Upsert system fields (id, urn, timestamps, status)
+        data = self.upsert_version_system_fields(data, update=False)
+
+        # Persist to ES
+        try:
+            ELASTIC_CLIENT.index_entity(
+                index_name=self.version_collection_name,
+                id=data["id"],
+                body=data,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create version for {parent_urn}: {e}")
+            raise DataError(f"Failed to create version for {parent_urn}: {e}")
+
+        return self.version_dump_schema.model_validate(data).model_dump(mode="json")
+
+    def get_version(self, identifier: str) -> Dict[str, Any]:
+        """
+        Fetch a single version document by:
+        - UUID id, OR
+        - URN, OR
+        - URN slug (mapped to full URN).
+        """
+        ident = self._version_get_identifier(identifier)
+
+        # If ident looks like a UUID, search by id, otherwise search by urn
+        if is_valid_uuid(ident):
+            qspec = {"fq": [f"id:{ident}"], "size": 1, "offset": 0}
+        else:
+            qspec = {"fq": [f"urn:{ident}"], "size": 1, "offset": 0}
+
+        try:
+            result = ELASTIC_CLIENT.search_entities(
+                index_name=self.version_collection_name,
+                qspec=qspec,
+            )
+            if isinstance(result, dict) and "results" in result:
+                hits = result["results"]
+            else:
+                hits = result
+        except Exception as e:
+            logger.error(f"Failed to fetch version {identifier}: {e}")
+            raise DataError(f"Failed to fetch version {identifier}: {e}")
+
+        if not hits:
+            raise NotFoundError(f"Version {identifier} not found.")
+
+        doc = hits[0]
+        return self.version_dump_schema.model_validate(doc).model_dump(mode="json")
+
+    def list_versions(
+        self,
+        parent_urn: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        List all versions for a given parent entity.
+        """
+        # Ensure parent exists (fail fast)
+        self.validate_existence(parent_urn)
+
+        qspec = {
+            "fq": [f"parent_urn:{parent_urn}"],
+            "size": limit or 100,
+            "offset": offset or 0,
+        }
+
+        try:
+            result = ELASTIC_CLIENT.search_entities(
+                index_name=self.version_collection_name,
+                qspec=qspec,
+            )
+            if isinstance(result, dict) and "results" in result:
+                hits = result["results"]
+            else:
+                hits = result
+        except Exception as e:
+            logger.error(f"Failed to list versions for {parent_urn}: {e}")
+            raise DataError(f"Failed to list versions for {parent_urn}: {e}")
+
+        return [
+            self.version_dump_schema.model_validate(doc).model_dump(mode="json")
+            for doc in hits
+        ]
+
+    def get_latest_version(self, parent_urn: str) -> Optional[Dict[str, Any]]:
+        """
+        Return the latest version document for the given parent.
+
+        Strategy:
+        - First look for is_latest:true.
+        - If none, pick the one with max created_at.
+        """
+        # Ensure parent exists
+        self.validate_existence(parent_urn)
+
+        # First try with is_latest:true
+        qspec_latest = {
+            "fq": [f"parent_urn:{parent_urn}", "is_latest:true"],
+            "size": 1,
+            "offset": 0,
+        }
+
+        try:
+            result = ELASTIC_CLIENT.search_entities(
+                index_name=self.version_collection_name,
+                qspec=qspec_latest,
+            )
+            if isinstance(result, dict) and "results" in result:
+                hits = result["results"]
+            else:
+                hits = result
+        except Exception as e:
+            logger.error(f"Failed to fetch latest version for {parent_urn}: {e}")
+            raise DataError(f"Failed to fetch latest version for {parent_urn}: {e}")
+
+        if hits:
+            doc = hits[0]
+            return self.version_dump_schema.model_validate(doc).model_dump(mode="json")
+
+        # Fallback: sort by created_at desc (if your qspec supports sort)
+        qspec_all = {
+            "fq": [f"parent_urn:{parent_urn}"],
+            "size": 1,
+            "offset": 0,
+            "sort": ["created_at:desc"],
+        }
+
+        try:
+            result = ELASTIC_CLIENT.search_entities(
+                index_name=self.version_collection_name,
+                qspec=qspec_all,
+            )
+            if isinstance(result, dict) and "results" in result:
+                hits = result["results"]
+            else:
+                hits = result
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch latest version (fallback) for {parent_urn}: {e}"
+            )
+            raise DataError(
+                f"Failed to fetch latest version (fallback) for {parent_urn}: {e}"
+            )
+
+        if not hits:
+            return None
+
+        doc = hits[0]
+        return self.version_dump_schema.model_validate(doc).model_dump(mode="json")
+
+    def patch_version(self, identifier: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update an existing version document (partial update).
+
+        - Validates via version_update_schema.
+        - Does not allow changing parent_urn or parent_type here.
+        """
+        if self.version_update_schema is None:
+            raise NotAllowedError(f"Versions for {self.name} do not support updates.")
+
+        # Load current to ensure it exists
+        current = self.get_version(identifier)
+        version_id = current["id"]
+
+        try:
+            update_data = self.version_update_schema.model_validate(spec).model_dump(
+                mode="json",
+                exclude_unset=True,
+            )
+        except Exception as e:
+            raise DataError(f"Invalid version update spec: {e}")
+
+        # Guard against parent change
+        for forbidden in ("parent_urn", "parent_type", "id", "urn"):
+            if forbidden in update_data:
+                update_data.pop(forbidden, None)
+
+        update_data = self.upsert_version_system_fields(update_data, update=True)
+
+        try:
+            ELASTIC_CLIENT.update_entity(
+                index_name=self.version_collection_name,
+                id=version_id,
+                body={"doc": update_data},
+            )
+        except Exception as e:
+            logger.error(f"Failed to update version {identifier}: {e}")
+            raise DataError(f"Failed to update version {identifier}: {e}")
+
+        # Return fresh version
+        return self.get_version(version_id)
+
+    def delete_version(self, identifier: str, purge: bool = False) -> bool:
+        """
+        Delete a version document by id / URN / slug.
+
+        - If purge=False: soft delete (status='deleted').
+        - If purge=True: hard delete.
+        """
+        # Make sure it exists
+        version = self.get_version(identifier)
+        version_id = version["id"]
+
+        try:
+            if purge:
+                deleted = ELASTIC_CLIENT.delete_entity(
+                    index_name=self.version_collection_name,
+                    id=version_id,
+                )
+                return bool(deleted)
+            else:
+                update_data = {
+                    "status": "deleted",
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+                ELASTIC_CLIENT.update_entity(
+                    index_name=self.version_collection_name,
+                    id=version_id,
+                    body={"doc": update_data},
+                )
+                return True
+        except NotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete version {identifier}: {e}")
+            raise DataError(f"Failed to delete version {identifier}: {e}")
+
+
+"""
 DependentEntity
 ------------------
 Base class for entities that are *dependent* on other API entities,
@@ -406,6 +903,8 @@ A DependentEntity:
 - reuses most of Entity's infrastructure (search, list, fetch, create, patch, delete),
 - adds parent existence validation and tweaks system-field upsert logic.
 """
+
+
 class DependentEntity(Entity):
     """
     Base class for entities that depend on other entities (e.g. engagements).
@@ -487,7 +986,9 @@ class DependentEntity(Entity):
             try:
                 REDIS.delete(identifier)
             except Exception as e:
-                logger.error(f"Failed to invalidate cache for dependent entity {identifier}: {e}")
+                logger.error(
+                    f"Failed to invalidate cache for dependent entity {identifier}: {e}"
+                )
 
     def get_cached(self, identifier: str) -> Dict[str, Any]:
         obj = None
@@ -526,7 +1027,9 @@ class DependentEntity(Entity):
 
     # ---------- System fields handling ----------
 
-    def upsert_system_fields(self, spec: Dict[str, Any], update: bool = False) -> Dict[str, Any]:
+    def upsert_system_fields(
+        self, spec: Dict[str, Any], update: bool = False
+    ) -> Dict[str, Any]:
         """
         Upsert system fields for a dependent entity.
 

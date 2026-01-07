@@ -28,13 +28,13 @@ from schemas import (
     ArticleSchema,
 )
 
-from entity import Entity
+from entity import VersionedEntity
 from backend.embedding_queue import EMBEDDING_QUEUE
 
 logger = logging.getLogger(__name__)
 
 
-class Article(Entity):
+class Article(VersionedEntity):
     def __init__(self):
         super().__init__(
             "article",
