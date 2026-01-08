@@ -10,9 +10,10 @@ and serialization. It implements the CRUD operations while leveraging
 the underlying infrastructure provided by the Entity base class.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Dict, Any
 from backend.elastic import ELASTIC_CLIENT
 from entities.artifacts import ARTIFACT
+from datetime import datetime
 from exceptions import (
     DataError,
     InternalError,
@@ -22,19 +23,19 @@ from exceptions import (
 import logging
 import uuid
 from schemas import (
-    SearchSchema,
     ArticleCreationSchema,
+    ArticleEnhancementSchema,
     ArticleUpdateSchema,
     ArticleSchema,
 )
 
-from entity import VersionedEntity
+from entity import Entity
 from backend.embedding_queue import EMBEDDING_QUEUE
 
 logger = logging.getLogger(__name__)
 
 
-class Article(VersionedEntity):
+class Article(Entity):
     def __init__(self):
         super().__init__(
             "article",
@@ -145,6 +146,53 @@ class Article(VersionedEntity):
                 "source": "article.embed_rag",
                 "requested_by": creator.get("preferred_username") if creator else None,
             },
+        }
+
+    def enhance(self, urn: str, spec: ArticleEnhancementSchema, enhancer=None) -> Dict[str, Any]:
+
+        self.validate_existence(urn)
+        current = self.get(urn)
+
+        before = {}
+        after = {}
+
+        for field, new_value in spec.fields.items():
+            before[field] = current.get(field)
+            after[field] = new_value
+
+        id = str(uuid.uuid4())
+        enhancement_event = {
+            "agent": spec.agent,
+            "run_id": id,
+            "enhanced_at": datetime.now().isoformat(),
+            "fields": list(spec.fields.keys()),
+            "before": before,
+            "after": after,
+        }
+
+        ELASTIC_CLIENT.enhance_entity(
+            index_name=self.collection_name,
+            urn=urn,
+            fields=spec.fields,
+            enhancement_event=enhancement_event,
+        )
+
+        # Re-embed if semantic fields changed
+        if any(f in ("title", "abstract", "content") for f in spec.fields):
+            EMBEDDING_QUEUE.enqueue(
+                self.embed(urn, None, enhancer)
+            )
+            EMBEDDING_QUEUE.enqueue(
+                self.embed_chunks(urn, None, enhancer)
+            )
+
+        # Invalidate cache, so next miss retrieves fresh data
+        self.invalidate_cache(urn)
+        return {
+            "urn": current["urn"],
+            "run_id": id,
+            "enhanced_fields": list(spec.fields.keys()),
+            "agent": spec.agent,
         }
 
 

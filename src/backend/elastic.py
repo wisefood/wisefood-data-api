@@ -1,5 +1,6 @@
 import os
 import threading
+from datetime import datetime
 from elasticsearch import Elasticsearch, NotFoundError, BadRequestError
 from typing import Optional, List, Dict, Any
 from es_schema import (
@@ -129,6 +130,55 @@ class ElasticsearchClientSingleton:
             id=document["urn"],
             doc=merged,
             refresh="wait_for",
+        )
+
+    def enhance_entity(
+        self,
+        index_name: str,
+        urn: str,
+        *,
+        fields: Dict[str, Any],
+        enhancement_event: Dict[str, Any],
+        updated_at: str | None = None,
+    ) -> None:
+        """
+        Append an AI enhancement event and update fields atomically.
+        """
+
+        updated_at = updated_at or datetime.utcnow().isoformat()
+
+        self.client.update(
+            index=index_name,
+            id=urn,
+            refresh="wait_for",
+            script={
+                "lang": "painless",
+                "source": """
+                    if (ctx._source.enhancements == null) {
+                        ctx._source.enhancements = [];
+                    }
+                    ctx._source.enhancements.add(params.event);
+
+                    if (ctx._source.ai_generated_fields == null) {
+                        ctx._source.ai_generated_fields = [];
+                    }
+
+                    for (entry in params.fields.entrySet()) {
+                        ctx._source[entry.getKey()] = entry.getValue();
+
+                        if (!ctx._source.ai_generated_fields.contains(entry.getKey())) {
+                            ctx._source.ai_generated_fields.add(entry.getKey());
+                        }
+                    }
+
+                    ctx._source.updated_at = params.updated_at;
+                """,
+                "params": {
+                    "event": enhancement_event,
+                    "fields": fields,
+                    "updated_at": updated_at,
+                },
+            },
         )
 
     def delete_by_query(self, index_name: str, query: Dict[str, Any]) -> None:
@@ -309,6 +359,129 @@ class ElasticsearchClientSingleton:
             "facets": facets,
             "total": r["hits"]["total"]["value"],
         }
+
+    from typing import Dict, Any
+
+
+    def rebuild_index(
+        self,
+        *,
+        alias_name: str,
+        new_index_name: str,
+        mapping: Dict[str, Any],
+        settings: Dict[str, Any],
+        delete_old: bool = False,
+    ) -> None:
+        """
+        Rebuild an Elasticsearch index with a new mapping without data loss.
+
+        Handles BOTH cases:
+        - alias_name is already an alias
+        - alias_name is a concrete index (one-time migration)
+        """
+
+        client = self.client
+        old_index = None
+
+        # ─────────────────────────────────────────────
+        # 1️⃣ Resolve old index (alias OR concrete index)
+        # ─────────────────────────────────────────────
+
+        if client.indices.exists_alias(name=alias_name):
+            # Normal case: alias already exists
+            alias_info = client.indices.get_alias(name=alias_name)
+            old_index = list(alias_info.keys())[0]
+
+        elif client.indices.exists(index=alias_name):
+            # One-time migration: alias_name is a concrete index
+            old_index = alias_name
+            migrated_index = f"{alias_name}_v1"
+
+            if not client.indices.exists(index=migrated_index):
+                # Reindex alias_name → alias_name_v1
+                client.indices.create(
+                    index=migrated_index,
+                    body={
+                        "settings": settings,
+                        "mappings": mapping,
+                    },
+                )
+
+                client.reindex(
+                    body={
+                        "source": {"index": old_index},
+                        "dest": {"index": migrated_index},
+                    },
+                    wait_for_completion=True,
+                    refresh=True,
+                    timeout="1h",
+                )
+
+            # Delete blocking concrete index name
+            client.indices.delete(index=old_index)
+
+            # Create alias
+            client.indices.update_aliases(
+                body={
+                    "actions": [
+                        {"add": {"index": migrated_index, "alias": alias_name}}
+                    ]
+                }
+            )
+
+            old_index = migrated_index
+
+        else:
+            # Fresh install: nothing exists yet
+            old_index = None
+
+        # ─────────────────────────────────────────────
+        # 2️⃣ Create new index
+        # ─────────────────────────────────────────────
+
+        if client.indices.exists(index=new_index_name):
+            raise RuntimeError(f"Index '{new_index_name}' already exists")
+
+        client.indices.create(
+            index=new_index_name,
+            body={
+                "settings": settings,
+                "mappings": mapping,
+            },
+        )
+
+        # ─────────────────────────────────────────────
+        # 3️⃣ Reindex old → new
+        # ─────────────────────────────────────────────
+
+        if old_index:
+            client.reindex(
+                body={
+                    "source": {"index": old_index},
+                    "dest": {"index": new_index_name},
+                },
+                wait_for_completion=True,
+                refresh=True,
+                timeout="1h",
+            )
+
+        # ─────────────────────────────────────────────
+        # 4️⃣ Atomically switch alias
+        # ─────────────────────────────────────────────
+
+        actions = []
+        if old_index:
+            actions.append({"remove": {"index": old_index, "alias": alias_name}})
+        actions.append({"add": {"index": new_index_name, "alias": alias_name}})
+
+        client.indices.update_aliases(body={"actions": actions})
+
+        # ─────────────────────────────────────────────
+        # 5️⃣ Optional cleanup
+        # ─────────────────────────────────────────────
+
+        if delete_old and old_index:
+            client.indices.delete(index=old_index)
 
 
 ELASTIC_CLIENT = ElasticsearchClientSingleton()

@@ -285,7 +285,9 @@ class Entity:
             "Subclasses of the Entity class must implement this method."
         )
 
-    def embed_entity(self, spec: Dict[str, Any], creator: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def embed_entity(
+        self, spec: Dict[str, Any], creator: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """
         Enqueue an embedding job for an entity; returns immediately with job info.
 
@@ -298,7 +300,9 @@ class Entity:
         job_id = EMBEDDING_QUEUE.enqueue(job_payload)
         return {"urn": identifier, "job_id": job_id, "status": "queued"}
 
-    def embed(self, urn: str, spec: Dict[str, Any], creator: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def embed(
+        self, urn: str, spec: Dict[str, Any], creator: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """
         Build an embedding job payload for the given entity.
 
@@ -306,6 +310,32 @@ class Entity:
         :param spec: The validated data for embedding.
         :param creator: The requesting user (if available).
         :return: A job payload dict.
+        """
+        raise NotImplementedError(
+            "Subclasses of the Entity class must implement this method."
+        )
+
+    def enhance_entity(
+        self, urn: str, spec: Dict[str, Any], creator: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
+        """
+        Apply an AI-generated enhancement for an entity bundler method.
+
+        :param spec: The data for the entity to enhance.
+        :param creator: The requesting user (if available) for audit metadata.
+        :return: A dict containing job metadata.
+        """
+        return self.enhance(urn, spec, creator)
+
+    def enhance(
+        self, urn: str, spec: Dict[str, Any], creator: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
+        """
+        Apply an AI-generated enhancement for an entity.
+
+        :param spec: The data for the entity to enhance.
+        :param creator: The requesting user (if available) for audit metadata.
+        :return: A dict containing job metadata.
         """
         raise NotImplementedError(
             "Subclasses of the Entity class must implement this method."

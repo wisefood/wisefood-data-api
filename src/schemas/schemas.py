@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, date
 from enum import Enum
-from typing import Annotated, List, Optional, Literal, Union
+from typing import Annotated, List, Optional, Literal, Union, Dict, Any
 from uuid import UUID
 
 from pydantic import (
@@ -11,10 +11,10 @@ from pydantic import (
     HttpUrl,
     EmailStr,
     field_validator,
-    model_validator,
     StringConstraints,
     ConfigDict,
 )
+
 
 # ---- enums & constrained types ----
 
@@ -46,9 +46,15 @@ class LoginSchema(BaseModel):
     username: str = Field(..., description="Username or email")
     password: str = Field(..., description="Password")
 
+
 class MTMSchema(BaseModel):
     client_id: str = Field(..., description="Client ID")
     client_secret: str = Field(..., description="Client Secret")
+
+class AIEnhancedField(str, Enum):
+    AI_TAGS = "ai_tags"
+    AI_CATEGORY = "ai_category"
+    AI_KEY_TAKEAWAYS = "ai_key_takeaways"
 
 class SearchSchema(BaseModel):
     q: Optional[str] = Field(default=None, description="Search query string")
@@ -87,7 +93,6 @@ class SearchSchema(BaseModel):
     highlight_post_tag: str = Field(
         default="</em>", description="HTML tag (or text) to suffix highlights"
     )
-
 
 
 class Status(str, Enum):
@@ -352,6 +357,10 @@ class ArticleSchema(BaseSchema):
         str_strip_whitespace=True,
         use_enum_values=True,
     )
+
+    # ----------------------------
+    # System / embedding
+    # ----------------------------
     embedded_at: Optional[datetime] = Field(
         None,
         description="Timestamp when the article was embedded",
@@ -362,45 +371,99 @@ class ArticleSchema(BaseSchema):
         description="Resource type discriminator",
         exclude=True,
     )
+
+    # ----------------------------
+    # Bibliographic & content
+    # ----------------------------
     organization_urn: Optional[UrnStr] = Field(
         None,
         description="URN of the publishing organization",
     )
+
     abstract: Optional[NonEmptyAbstract] = Field(
         None,
         description="Abstract of the article (<= 15000 chars)",
     )
-    category: Optional[NonEmptyStr] = Field(
+
+    description: Optional[NonEmptyStr] = Field(
         None,
-        description="Category of the article (e.g. nutrition, health)",
+        description="Human-readable summary of the article",
     )
-    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] = Field(
-        default_factory=list,
-        description="List of authors",
-    )
-    publication_year:Optional[date] = Field(
-        None,
-        description="Publication year as integer or full date; integers normalized to YYYY-01-01",
-    )
-    external_id: Optional[NonEmptyStr] = Field(
-        None,
-        description="External identifier (e.g., DOI, PubMed ID, Semantic Scholar ID)",
-    )
-    doi: Optional[NonEmptyStr] = Field(
-        None,
-        description="Digital Object Identifier (DOI)",
-    )
+
     content: str = Field(
         ...,
         description="Full text content of the article",
     )
+
+    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] = Field(
+        default_factory=list,
+        description="List of authors",
+    )
+
     venue: Optional[NonEmptyStr] = Field(
         None,
         description="Venue where the article was published",
     )
-    artifacts: List[ArtifactSchema] = Field(
+
+    publication_year: Optional[date] = Field(
+        None,
+        description="Publication year (normalized to YYYY-01-01 if year-only)",
+    )
+
+    external_id: Optional[NonEmptyStr] = Field(
+        None,
+        description="External identifier (e.g., PubMed ID, Semantic Scholar ID)",
+    )
+
+    doi: Optional[NonEmptyStr] = Field(
+        None,
+        description="Digital Object Identifier (DOI)",
+    )
+
+    # ----------------------------
+    # Human-authoritative classification
+    # ----------------------------
+    tags: List[NonEmptyStr] = Field(
         default_factory=list,
-        description="Associated artifacts (figures, tables, datasets, etc.)",
+        description="Authoritative, reviewed topic tags",
+    )
+
+    category: Optional[NonEmptyStr] = Field(
+        None,
+        description="Authoritative article category",
+    )
+
+    region: Optional[NonEmptyStr] = Field(
+        None,
+        description="Authoritative geographic region",
+    )
+
+    language: Optional[NonEmptyStr] = Field(
+        None,
+        description="Detected language of the article (ISO code)",
+    )
+
+    # ----------------------------
+    # AI-derived classification (read-only)
+    # ----------------------------
+    ai_tags: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="AI-derived topic tags (not human-reviewed)",
+    )
+
+    ai_category: Optional[NonEmptyStr] = Field(
+        None,
+        description="AI-derived article category",
+    )
+
+    key_takeaways: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Reviewed, authoritative key takeaways from the article",
+    )
+
+    ai_key_takeaways: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="AI-generated key takeaways (not human-reviewed)",
     )
 
     def model_dump(self, **kwargs):
@@ -411,9 +474,8 @@ class ArticleSchema(BaseSchema):
 
 class ArticleCreationSchema(BaseModel):
     """
-    Schema for creating a new article. System generates: id, creator, created_at, updated_at.
-    User provides URN as a slug (e.g., 'healthy_eating_article'),
-    system prepends 'urn:article:' internally.
+    Schema for creating a new article.
+    System generates: id, creator, created_at, updated_at.
     """
 
     model_config = ConfigDict(
@@ -426,68 +488,83 @@ class ArticleCreationSchema(BaseModel):
         ...,
         description="URN slug (e.g., 'healthy_eating_article')",
     )
+
     title: NonEmptyStr = Field(
         ...,
         description="Human-readable title",
     )
-    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
-        default_factory=list,
-        description="Topic tags",
-    )
-    url: Optional[HttpUrl] = Field(
-        None,
-        description="Canonical public URL to the resource",
-    )
-    external_id: Optional[NonEmptyStr] = Field(
-        None,
-        description="External identifier (e.g., PubMed ID, Semantic Scholar ID)",
-    )
-    doi: Optional[NonEmptyStr] = Field(
-        None,
-        description="Digital Object Identifier (DOI)",
-    )
-    license: Optional[LicenseId] = Field(
-        None,
-        description="License identifier",
-    )
-    organization_urn: Optional[UrnStr] = Field(
-        None,
-        description="URN of the publishing organization",
-    )
-    description: Optional[NonEmptyStr] = Field(
-        None,
-        description="Summary/abstract of the resource (<= 2000 chars)",
-    )
-    abstract: Optional[NonEmptyAbstract] = Field(
-        None,
-        description="Abstract of the article (<= 15000 chars)",
-    )
-    category: Optional[NonEmptyStr] = Field(
-        None,
-        description="Category of the article (e.g. nutrition, health)",
-    )
-    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] = Field(
-        default_factory=list,
-        description="List of authors",
-    )
-    publication_year: Optional[date] = Field(
-        None,
-        description="Publication year as integer or full date; integers normalized to YYYY-01-01",
-    )
+
     content: str = Field(
         ...,
         description="Full text content of the article",
     )
+
+    description: Optional[NonEmptyStr] = Field(
+        None,
+        description="Human-written summary",
+    )
+
+    abstract: Optional[NonEmptyAbstract] = Field(
+        None,
+        description="Abstract of the article",
+    )
+
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
+        default_factory=list,
+        description="Authoritative topic tags",
+    )
+
+    category: Optional[NonEmptyStr] = Field(
+        None,
+        description="Authoritative article category",
+    )
+
+    authors: Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] = Field(
+        default_factory=list,
+        description="List of authors",
+    )
+
     venue: NonEmptyStr = Field(
         ...,
         description="Venue where the article was published",
     )
 
-    @field_validator("publication_year", mode="before")
-    @classmethod
-    def validate_publication_year(cls, v):
-        # here, normalize_publication_year refers to the module-level function
-        return normalize_publication_year(v)
+    publication_year: Optional[date] = Field(
+        None,
+        description="Publication year",
+    )
+
+    url: Optional[HttpUrl] = Field(
+        None,
+        description="Canonical public URL",
+    )
+
+    external_id: Optional[NonEmptyStr] = Field(
+        None,
+        description="External identifier",
+    )
+
+    doi: Optional[NonEmptyStr] = Field(
+        None,
+        description="Digital Object Identifier (DOI)",
+    )
+
+    license: Optional[LicenseId] = Field(
+        None,
+        description="License identifier",
+    )
+
+    organization_urn: Optional[UrnStr] = Field(
+        None,
+        description="Publishing organization URN",
+    )
+
+    key_takeaways: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=10)] = (
+        Field(
+            default_factory=list,
+            description="Optional key takeaways written by the author/editor",
+        )
+    )
 
     @field_validator("tags")
     @classmethod
@@ -495,6 +572,11 @@ class ArticleCreationSchema(BaseModel):
         if len(set(map(str.lower, v))) != len(v):
             raise ValueError("tags must be unique (case-insensitive)")
         return v
+
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def validate_publication_year(cls, v):
+        return normalize_publication_year(v)
 
 
 class ArticleUpdateSchema(BaseModel):
@@ -538,6 +620,10 @@ class ArticleUpdateSchema(BaseModel):
         description="URN of the publishing organization",
     )
 
+    key_takeaways: (
+        Annotated[List[NonEmptyStr], Field(min_length=0, max_length=10)] | None
+    ) = None
+
     @field_validator("tags")
     @classmethod
     def unique_tags(cls, v: List[str] | None) -> List[str] | None:
@@ -550,6 +636,24 @@ class ArticleUpdateSchema(BaseModel):
     def validate_publication_year(cls, v):
         # here, normalize_publication_year refers to the module-level function
         return normalize_publication_year(v)
+
+
+class ArticleEnhancementSchema(BaseModel):
+    agent: SlugStr = Field(
+        ..., description="Agent identifier (lowercase with dashes or underscores)"
+    )
+
+    fields: Dict[AIEnhancedField, Any] = Field(
+        ...,
+        description="AI-derived fields keyed by allowed enhancement field names",
+    )
+
+    @field_validator("fields")
+    @classmethod
+    def validate_fields_not_empty(cls, v):
+        if not v:
+            raise ValueError("fields must contain at least one AI enhancement")
+        return v
 
 
 class FoodCompositionTableSchema(BaseSchema):
@@ -621,7 +725,6 @@ class FoodCompositionTableSchema(BaseSchema):
     )
 
     artifacts: List[ArtifactSchema] = Field(default_factory=list)
-
 
     region: Optional[NonEmptyStr] = Field(None, description="Region (e.g. CH).")
 
@@ -787,7 +890,6 @@ class OrganizationUpdateSchema(BaseModel):
     url: HttpUrl | None = None
     contact_email: EmailStr | None = None
     image_url: Optional[HttpUrl] = None
-
 
 
 def normalize_publication_year(v):

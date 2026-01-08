@@ -291,8 +291,28 @@ def article_index(dim: int) -> Dict[str, Any]:
         "settings": DEFAULT_SETTINGS,
         "mappings": {
             "properties": {
+                # ----------------------------
+                # Identity & governance (never AI)
+                # ----------------------------
                 "urn": {"type": "keyword"},
                 "id": {"type": "keyword"},
+                "external_id": {"type": "keyword"},
+                "url": {"type": "keyword"},
+                "license": {"type": "keyword"},
+                "creator": {"type": "keyword"},
+                "status": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+
+                # ----------------------------
+                # Core content (human source, AI may enhance but not invent)
+                # ----------------------------
                 "title": {
                     "type": "text",
                     "analyzer": "default_text",
@@ -306,79 +326,91 @@ def article_index(dim: int) -> Dict[str, Any]:
                         },
                     },
                 },
-                "description": {
-                    "type": "text",
-                    "analyzer": "default_text",
-                    "search_analyzer": "default_text",
-                },
-                "tags": {"type": "keyword"},
-                "status": {"type": "keyword"},
-                "creator": {"type": "keyword"},
-                "created_at": {
-                    "type": "date",
-                    "format": "strict_date_optional_time||epoch_millis",
-                },
-                "updated_at": {
-                    "type": "date",
-                    "format": "strict_date_optional_time||epoch_millis",
-                },
-                "url": {"type": "keyword"},
-                "license": {"type": "keyword"},
-                "region": {"type": "keyword"},
-                "language": {"type": "keyword"},
-                "external_id": {"type": "keyword"},
                 "abstract": {
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
-                "category": {"type": "keyword"},
-                "type": {"type": "keyword"},
-                "authors": {
-                    "type": "keyword",
+                "description": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
                 },
-                "publication_year": {
-                    "type": "date",
-                    "format": "yyyy||strict_date_optional_time||epoch_millis",
-                },
-                "organization_urn": {"type": "keyword"},
                 "content": {
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
+
+                "key_takeaways": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+
+                "ai_key_takeaways": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+
+                # ----------------------------
+                # Bibliographic metadata (AI-assisted only)
+                # ----------------------------
+                "authors": {"type": "keyword"},
                 "venue": {"type": "keyword"},
-                # Nested artifacts (denormalized)
-                "artifacts": {
+                "organization_urn": {"type": "keyword"},
+                "publication_year": {
+                    "type": "date",
+                    "format": "yyyy||strict_date_optional_time||epoch_millis",
+                },
+
+                # ----------------------------
+                # Human-authoritative classification
+                # ----------------------------
+                "tags": {"type": "keyword"},
+                "category": {"type": "keyword"},
+                "region": {"type": "keyword"},
+                "language": {"type": "keyword"},
+
+                # ----------------------------
+                # AI-derived classification (never edited by humans)
+                # ----------------------------
+                "ai_tags": {"type": "keyword"},
+                "ai_category": {"type": "keyword"},
+                "ai_region": {"type": "keyword"},
+                # language is deterministic → no ai_language
+
+                # ----------------------------
+                # AI provenance & auditability
+                # ----------------------------
+                "ai_generated_fields": {"type": "keyword"},
+                "enhancements": {
                     "type": "nested",
                     "properties": {
-                        "urn": {"type": "keyword"},
-                        "id": {"type": "keyword"},
-                        "title": {
-                            "type": "text",
-                            "analyzer": "default_text",
-                            "search_analyzer": "default_text",
-                        },
-                        "description": {
-                            "type": "text",
-                            "analyzer": "default_text",
-                            "search_analyzer": "default_text",
-                        },
-                        "file_url": {"type": "keyword"},
-                        "file_type": {"type": "keyword"},
-                        "file_size": {"type": "long"},
-                        "created_at": {
+                        "agent": {"type": "keyword"},
+                        "run_id": {"type": "keyword"},
+                        "enhanced_at": {
                             "type": "date",
                             "format": "strict_date_optional_time||epoch_millis",
                         },
-                        "updated_at": {
-                            "type": "date",
-                            "format": "strict_date_optional_time||epoch_millis",
+                        "fields": {"type": "keyword"},
+
+                        # stored for audit/diff only
+                        "before": {
+                            "type": "object",
+                            "enabled": False,
                         },
-                        "type": {"type": "keyword"},
+                        "after": {
+                            "type": "object",
+                            "enabled": False,
+                        },
                     },
                 },
-                # Semantic embedding over article text
+
+                # ----------------------------
+                # Semantic search
+                # ----------------------------
                 "embedding": _embedding_field(dim),
                 "embedded_at": {
                     "type": "date",
@@ -387,6 +419,7 @@ def article_index(dim: int) -> Dict[str, Any]:
             }
         },
     }
+
 
 
 # ---------------------------------------------------------------------------
