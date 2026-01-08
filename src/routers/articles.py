@@ -89,31 +89,13 @@ def api_patch_article(request: Request, urn: str, a: ArticleUpdateSchema):
 
 @router.patch(
     "/{urn}/enhance",
-    dependencies=[Depends(auth("agent"))],
+    dependencies=[Depends(auth("agent", "admin"))],
     summary="Enhance an article",
     description="Apply AI-generated enhancements to an article by its URN.",
 )
 @render()
 def api_enhance_article(request: Request, urn: str, a: ArticleEnhancementSchema):
     return ARTICLE.enhance_entity(urn, a, kutils.current_user(request))
-
-
-@router.post(
-    "/rebuild",
-    dependencies=[Depends(auth())],
-    summary="Rebuild article index",
-    description="Rebuild the entire article index in the database.",
-)
-@render()
-def api_rebuild_article_index(request: Request):
-    return ELASTIC_CLIENT.rebuild_index(
-        alias_name="articles",
-        new_index_name="articles_v2",
-        mapping=article_index(384)["mappings"],
-        settings=article_index(384)["settings"],
-        delete_old=False,
-    )
-
 
 @router.delete(
     "/{urn}",
