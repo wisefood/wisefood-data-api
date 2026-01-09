@@ -386,6 +386,7 @@ class ElasticsearchClientSingleton:
         sort_spec = q.get("sort")
         if sort_spec:
             body["sort"] = []
+            body["track_scores"] = True  # Track scores even when sorting
             for field, order in self.parse_sort_string(sort_spec):
                 if field.lower() in ("relevance", "_score", "score"):
                     body["sort"].append({"_score": {"order": "desc"}})
