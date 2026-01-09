@@ -324,10 +324,11 @@ class ElasticsearchClientSingleton:
         # ----------------------------
         # Facet field selection
         # ----------------------------
-        facet_fields = q.get("fields") or []
+        facet_fields_list = q.get("fields") or []
+        facet_fields: Dict[str, str] = {}
 
         # 1) Explicit facet fields
-        if facet_fields:
+        if facet_fields_list:
             pass
 
         # 2) Infer from fq filters
@@ -336,10 +337,10 @@ class ElasticsearchClientSingleton:
             for fq in q["fq"]:
                 if ":" in fq:
                     extracted.add(fq.split(":", 1)[0].strip())
-            facet_fields = list(extracted)
+            facet_fields_list = list(extracted)
 
         # 3) Default mapping-driven facets
-        else:
+        if not facet_fields_list:
             facet_fields = self.get_default_facet_fields(index_name)
 
         # ----------------------------
