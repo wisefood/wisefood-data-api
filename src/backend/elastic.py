@@ -21,6 +21,47 @@ logger = logging.getLogger(__name__)
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
 ES_DIM = int(os.getenv("ES_DIM", 384))
 
+DEFAULT_FACET_EXCLUDE_FIELDS = {
+    # long text / content
+    "abstract",
+    "content",
+    "description",
+    "instructions",
+    "bio",
+    "text",
+    "snippet",
+    "key_takeaways",
+    "ai_key_takeaways",
+    # semantic-only
+    "embedding",
+    "embedded_at",
+
+    # technical / audit
+    "before",
+    "after",
+}
+
+NON_FACET_SEMANTIC_FIELDS = {
+    # identifiers
+    "id",
+    "urn",
+    "external_id",
+    "url",
+
+    # timestamps
+    "created_at",
+    "updated_at",
+    "embedded_at",
+
+    # display-only
+    "title",
+
+    # governance / audit
+    "status",
+    "license",
+    "ai_generated_fields",
+}
+
 
 class ElasticsearchClientSingleton:
     """Singleton around a single thread-safe Elasticsearch client."""
@@ -210,10 +251,49 @@ class ElasticsearchClientSingleton:
             result.append((field, order))
 
         return result
+    
+    def get_default_facet_fields(self, index_name: str) -> Dict[str, str]:
+        mapping = self.client.indices.get_mapping(index=index_name)
+        props = mapping[index_name]["mappings"].get("properties", {})
 
-    def search_entities(self, index_name: str, qspec: SearchSchema) -> Dict[str, Any]:
+        facet_fields: Dict[str, str] = {}
+
+        for field, spec in props.items():
+            if field in DEFAULT_FACET_EXCLUDE_FIELDS:
+                continue
+            if field in NON_FACET_SEMANTIC_FIELDS:
+                continue
+
+            field_type = spec.get("type")
+
+            if field_type in {
+                "keyword",
+                "integer",
+                "long",
+                "float",
+                "boolean",
+                "date",
+            }:
+                facet_fields[field] = field_type
+                continue
+
+            if (
+                field_type == "text"
+                and "fields" in spec
+                and "keyword" in spec["fields"]
+                and field not in {"title"}
+            ):
+                facet_fields[field] = "text"
+
+        return facet_fields
+
+
+    def search_entities(self, index_name: str, qspec) -> Dict[str, Any]:
         q = qspec.model_dump()
 
+        # ----------------------------
+        # Query construction
+        # ----------------------------
         must_clauses = []
         if q.get("q"):
             must_clauses.append(
@@ -241,31 +321,55 @@ class ElasticsearchClientSingleton:
             },
         }
 
+        # ----------------------------
+        # Facet field selection
+        # ----------------------------
         facet_fields = q.get("fields") or []
 
-        if not facet_fields and q.get("fq"):
-            # best-effort extraction of facet fields from "field:value" filters
-            extracted_fields = set()
+        # 1) Explicit facet fields
+        if facet_fields:
+            pass
+
+        # 2) Infer from fq filters
+        elif q.get("fq"):
+            extracted = set()
             for fq in q["fq"]:
                 if ":" in fq:
-                    field_name = fq.split(":", 1)[0].strip()
-                    extracted_fields.add(field_name)
-            facet_fields = list(extracted_fields)
+                    extracted.add(fq.split(":", 1)[0].strip())
+            facet_fields = list(extracted)
 
+        # 3) Default mapping-driven facets
+        else:
+            facet_fields = self.get_default_facet_fields(index_name)
+
+        # ----------------------------
+        # Aggregations
+        # ----------------------------
         if facet_fields:
             body["aggs"] = {}
-            for field in facet_fields:
+
+            for field, field_type in facet_fields.items():
+                # use correct field path
+                if field_type == "text":
+                    agg_field = f"{field}.keyword"
+                else:
+                    agg_field = field
+
                 body["aggs"][f"{field}_facet"] = {
                     "terms": {
-                        # Using .keyword by default is safer for text fields
-                        "field": f"{field}.keyword",
+                        "field": agg_field,
                         "size": q["facet_limit"],
+                        "order": {"_count": "desc"},
+                        "min_doc_count": 1,
                     }
                 }
 
+        # ----------------------------
+        # Source filtering & aliases
+        # ----------------------------
+        alias_map: Dict[str, str] = {}
         if q.get("fl"):
             source_fields = []
-            alias_map: Dict[str, str] = {}
             for f in q["fl"]:
                 if ":" in f:
                     original, alias = f.split(":", 1)
@@ -274,31 +378,26 @@ class ElasticsearchClientSingleton:
                 else:
                     source_fields.append(f)
             body["_source"] = source_fields
-        else:
-            alias_map = {}
 
+        # ----------------------------
+        # Sorting
+        # ----------------------------
         sort_spec = q.get("sort")
-
         if sort_spec:
-            sort_items = self.parse_sort_string(sort_spec)
             body["sort"] = []
-
-            for field, order in sort_items:
-                # Relevance sorting
-                if field.lower() in ("relevance", "score", "_score"):
+            for field, order in self.parse_sort_string(sort_spec):
+                if field.lower() in ("relevance", "_score", "score"):
                     body["sort"].append({"_score": {"order": "desc"}})
                 else:
                     body["sort"].append({field: {"order": order}})
 
+        # ----------------------------
+        # Highlighting
+        # ----------------------------
         if q.get("highlight"):
-            # Decide which fields to highlight:
-            # 1) explicit highlight_fields
-            # 2) else fl (if present)
-            # 3) else everything ("*")
             if q.get("highlight_fields"):
                 hl_fields = q["highlight_fields"]
             elif q.get("fl"):
-                # use the original field names, not aliases
                 hl_fields = [f.split(":", 1)[0] for f in q["fl"]]
             else:
                 hl_fields = ["*"]
@@ -309,55 +408,64 @@ class ElasticsearchClientSingleton:
                 "fields": {field: {} for field in hl_fields},
             }
 
-        # --- Execute search, with retry on fielddata error ------------------
+        # ----------------------------
+        # Execute search (retry sort fix)
+        # ----------------------------
         try:
-            r = self.client.search(index=index_name, body=body)
+            response = self.client.search(index=index_name, body=body)
         except BadRequestError as e:
-            if "Fielddata is disabled" in str(e):
+            if "Fielddata is disabled" in str(e) and "sort" in body:
                 fixed = []
                 for s in body["sort"]:
                     (field, opts), = s.items()
-                    if not field.endswith(".keyword") and not field.startswith("_"):
+                    if not field.startswith("_") and not field.endswith(".keyword"):
                         fixed.append({f"{field}.keyword": opts})
                     else:
                         fixed.append(s)
                 body["sort"] = fixed
-                r = self.client.search(index=index_name, body=body)
+                response = self.client.search(index=index_name, body=body)
             else:
                 raise
 
+        # ----------------------------
+        # Results
+        # ----------------------------
         results: List[Dict[str, Any]] = []
-        for hit in r["hits"]["hits"]:
-            source = hit["_source"]
+        for hit in response["hits"]["hits"]:
+            src = hit["_source"]
 
             if q.get("fl"):
-                aliased = {}
-                for original in body["_source"]:
-                    if original in source:
-                        aliased[alias_map.get(original, original)] = source[original]
+                row = {
+                    alias_map.get(k, k): v
+                    for k, v in src.items()
+                    if k in alias_map or k in body["_source"]
+                }
             else:
-                aliased = dict(source)
+                row = dict(src)
 
-            aliased["_score"] = hit.get("_score")
+            row["_score"] = hit.get("_score")
 
             if q.get("highlight") and "highlight" in hit:
-                aliased["_highlight"] = hit["highlight"]
+                row["_highlight"] = hit["highlight"]
 
-            results.append(aliased)
+            results.append(row)
 
+        # ----------------------------
+        # Facet results
+        # ----------------------------
         facets: Dict[str, List[Dict[str, Any]]] = {}
-        if "aggregations" in r:
-            for agg_name, agg_data in r["aggregations"].items():
-                field_name = agg_name.replace("_facet", "")
-                facets[field_name] = [
-                    {"value": bucket["key"], "count": bucket["doc_count"]}
-                    for bucket in agg_data["buckets"]
+        if "aggregations" in response:
+            for agg_name, agg_data in response["aggregations"].items():
+                field = agg_name.replace("_facet", "")
+                facets[field] = [
+                    {"value": b["key"], "count": b["doc_count"]}
+                    for b in agg_data["buckets"]
                 ]
 
         return {
             "results": results,
             "facets": facets,
-            "total": r["hits"]["total"]["value"],
+            "total": response["hits"]["total"]["value"],
         }
 
     from typing import Dict, Any

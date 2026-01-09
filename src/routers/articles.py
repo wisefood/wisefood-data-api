@@ -89,7 +89,7 @@ def api_patch_article(request: Request, urn: str, a: ArticleUpdateSchema):
 
 @router.patch(
     "/{urn}/enhance",
-    dependencies=[Depends(auth("agent", "admin"))],
+    dependencies=[Depends(auth("agent, admin"))],
     summary="Enhance an article",
     description="Apply AI-generated enhancements to an article by its URN.",
 )
