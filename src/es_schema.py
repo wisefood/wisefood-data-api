@@ -171,6 +171,14 @@ def artifact_index(dim: int) -> Dict[str, Any]:
                     "type": "date",
                     "format": "strict_date_optional_time||epoch_millis",
                 },
+                # ----------------------------
+                # Arbitrary metadata (stored only)
+                # ----------------------------
+                "extras": {
+                    "type": "object",
+                    "enabled": False,
+                },
+
             }
         },
     }
@@ -276,6 +284,14 @@ def guide_index(dim: int) -> Dict[str, Any]:
                     "type": "date",
                     "format": "strict_date_optional_time||epoch_millis",
                 },
+                # ----------------------------
+                # Arbitrary metadata (stored only)
+                # ----------------------------
+                "extras": {
+                    "type": "object",
+                    "enabled": False,
+                },
+
             }
         },
     }
@@ -415,6 +431,14 @@ def article_index(dim: int) -> Dict[str, Any]:
                 "embedded_at": {
                     "type": "date",
                     "format": "strict_date_optional_time||epoch_millis",
+                },
+
+                # ----------------------------
+                # Arbitrary metadata (stored only)
+                # ----------------------------
+                "extras": {
+                    "type": "object",
+                    "enabled": False,
                 },
             }
         },
