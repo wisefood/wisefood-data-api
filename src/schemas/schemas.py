@@ -443,9 +443,6 @@ class ArticleSchema(BaseSchema):
         description="Detected language of the article (ISO code)",
     )
 
-    # ----------------------------
-    # AI-derived classification (read-only)
-    # ----------------------------
     ai_tags: List[NonEmptyStr] = Field(
         default_factory=list,
         description="AI-derived topic tags (not human-reviewed)",
@@ -464,6 +461,11 @@ class ArticleSchema(BaseSchema):
     ai_key_takeaways: List[NonEmptyStr] = Field(
         default_factory=list,
         description="AI-generated key takeaways (not human-reviewed)",
+    )
+
+    extras: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Additional metadata not covered by other fields",
     )
 
     def model_dump(self, **kwargs):
@@ -566,6 +568,8 @@ class ArticleCreationSchema(BaseModel):
         )
     )
 
+    extras: Optional[Dict[str, Any]] = None
+
     @field_validator("tags")
     @classmethod
     def unique_tags(cls, v: List[str]) -> List[str]:
@@ -623,6 +627,8 @@ class ArticleUpdateSchema(BaseModel):
     key_takeaways: (
         Annotated[List[NonEmptyStr], Field(min_length=0, max_length=10)] | None
     ) = None
+
+    extras: Optional[Dict[str, Any]] = None
 
     @field_validator("tags")
     @classmethod
