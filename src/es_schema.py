@@ -376,6 +376,7 @@ def article_index(dim: int) -> Dict[str, Any]:
                 "authors": {"type": "keyword"},
                 "venue": {"type": "keyword"},
                 "organization_urn": {"type": "keyword"},
+                "doi": {"type": "keyword"},
                 "publication_year": {
                     "type": "date",
                     "format": "yyyy||strict_date_optional_time||epoch_millis",
@@ -388,6 +389,25 @@ def article_index(dim: int) -> Dict[str, Any]:
                 "category": {"type": "keyword"},
                 "region": {"type": "keyword"},
                 "language": {"type": "keyword"},
+
+                # ----------------------------
+                # Study metadata (structured, filterable)
+                # ----------------------------
+                "keywords": {"type": "keyword"},
+                "reader_group": {"type": "keyword"},
+                "age_group": {"type": "keyword"},
+                "population_group": {"type": "keyword"},
+                "geographic_context": {
+                    "properties": {
+                        "country_or_region": {"type": "keyword"},
+                        "income_setting": {"type": "keyword"},
+                    }
+                },
+                "biological_model": {"type": "keyword"},
+                "topics": {"type": "keyword"},
+                "study_type": {"type": "keyword"},
+                "hard_exclusion_flags": {"type": "keyword"},
+                "annotation_confidence": {"type": "float"},
 
                 # ----------------------------
                 # AI-derived classification (never edited by humans)

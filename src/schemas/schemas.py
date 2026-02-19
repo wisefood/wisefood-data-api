@@ -351,6 +351,17 @@ class GuideUpdateSchema(BaseModel):
         return v
 
 
+class GeographicContextSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    country_or_region: Optional[NonEmptyStr] = None
+    income_setting: Optional[NonEmptyStr] = None
+
+
 class ArticleSchema(BaseSchema):
     model_config = ConfigDict(
         extra="ignore",
@@ -421,6 +432,42 @@ class ArticleSchema(BaseSchema):
     )
 
     # ----------------------------
+    # Study metadata (structured, filterable)
+    # ----------------------------
+    keywords: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=250)] = (
+        Field(default_factory=list, description="Keywords for the article/study")
+    )
+
+    reader_group: Optional[NonEmptyStr] = Field(
+        None, description="Intended reader group (e.g., General Public)"
+    )
+    age_group: Optional[NonEmptyStr] = Field(None, description="Age group studied")
+    population_group: Optional[NonEmptyStr] = Field(
+        None, description="Population group studied"
+    )
+    geographic_context: Optional[GeographicContextSchema] = Field(
+        None, description="Geographic and income context"
+    )
+    biological_model: Optional[NonEmptyStr] = Field(
+        None, description="Biological model (e.g., Human)"
+    )
+    topics: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] = Field(
+        default_factory=list, description="High-level topics"
+    )
+    study_type: Optional[NonEmptyStr] = Field(None, description="Study design/type")
+    hard_exclusion_flags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = (
+        Field(default_factory=list, description="Hard exclusion flags")
+    )
+    annotation_confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="Confidence score for annotations (0..1)"
+    )
+
+    extras: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Arbitrary metadata (e.g., evaluation, annotations)",
+    )
+
+    # ----------------------------
     # Human-authoritative classification
     # ----------------------------
     tags: List[NonEmptyStr] = Field(
@@ -443,6 +490,9 @@ class ArticleSchema(BaseSchema):
         description="Detected language of the article (ISO code)",
     )
 
+    # ----------------------------
+    # AI-derived classification (read-only)
+    # ----------------------------
     ai_tags: List[NonEmptyStr] = Field(
         default_factory=list,
         description="AI-derived topic tags (not human-reviewed)",
@@ -461,11 +511,6 @@ class ArticleSchema(BaseSchema):
     ai_key_takeaways: List[NonEmptyStr] = Field(
         default_factory=list,
         description="AI-generated key takeaways (not human-reviewed)",
-    )
-
-    extras: Optional[Dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Additional metadata not covered by other fields",
     )
 
     def model_dump(self, **kwargs):
@@ -509,6 +554,29 @@ class ArticleCreationSchema(BaseModel):
     abstract: Optional[NonEmptyAbstract] = Field(
         None,
         description="Abstract of the article",
+    )
+
+    # Structured metadata (often AI-assisted, but stored explicitly)
+    keywords: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=250)] = Field(
+        default_factory=list, description="Keywords for the article/study"
+    )
+    reader_group: Optional[NonEmptyStr] = None
+    age_group: Optional[NonEmptyStr] = None
+    population_group: Optional[NonEmptyStr] = None
+    geographic_context: Optional[GeographicContextSchema] = None
+    biological_model: Optional[NonEmptyStr] = None
+    topics: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] = Field(
+        default_factory=list, description="High-level topics"
+    )
+    study_type: Optional[NonEmptyStr] = None
+    hard_exclusion_flags: Annotated[
+        List[NonEmptyStr], Field(min_length=0, max_length=50)
+    ] = Field(default_factory=list)
+    annotation_confidence: Optional[float] = Field(None, ge=0, le=1)
+
+    extras: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Arbitrary metadata (e.g., evaluation, annotations)",
     )
 
     tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
@@ -568,8 +636,6 @@ class ArticleCreationSchema(BaseModel):
         )
     )
 
-    extras: Optional[Dict[str, Any]] = None
-
     @field_validator("tags")
     @classmethod
     def unique_tags(cls, v: List[str]) -> List[str]:
@@ -598,6 +664,23 @@ class ArticleUpdateSchema(BaseModel):
     title: Optional[NonEmptyStr] = None
     description: Optional[NonEmptyStr] = None
     tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] | None = None
+    keywords: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=250)] | None = (
+        None
+    )
+    reader_group: Optional[NonEmptyStr] = None
+    age_group: Optional[NonEmptyStr] = None
+    population_group: Optional[NonEmptyStr] = None
+    geographic_context: Optional[GeographicContextSchema] = None
+    biological_model: Optional[NonEmptyStr] = None
+    topics: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] | None = (
+        None
+    )
+    study_type: Optional[NonEmptyStr] = None
+    hard_exclusion_flags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] | None = (
+        None
+    )
+    annotation_confidence: Optional[float] = Field(None, ge=0, le=1)
+    extras: Optional[Dict[str, Any]] = None
     external_id: Optional[NonEmptyStr] = Field(
         None,
         description="External identifier (e.g., PubMed ID, Semantic Scholar ID)",
@@ -627,8 +710,6 @@ class ArticleUpdateSchema(BaseModel):
     key_takeaways: (
         Annotated[List[NonEmptyStr], Field(min_length=0, max_length=10)] | None
     ) = None
-
-    extras: Optional[Dict[str, Any]] = None
 
     @field_validator("tags")
     @classmethod

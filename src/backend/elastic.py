@@ -258,32 +258,46 @@ class ElasticsearchClientSingleton:
 
         facet_fields: Dict[str, str] = {}
 
-        for field, spec in props.items():
-            if field in DEFAULT_FACET_EXCLUDE_FIELDS:
-                continue
-            if field in NON_FACET_SEMANTIC_FIELDS:
-                continue
+        def add_fields(properties: Dict[str, Any], *, prefix: str = "") -> None:
+            for field, spec in properties.items():
+                field_path = f"{prefix}{field}"
 
-            field_type = spec.get("type")
+                if field_path in DEFAULT_FACET_EXCLUDE_FIELDS or field in DEFAULT_FACET_EXCLUDE_FIELDS:
+                    continue
+                if field_path in NON_FACET_SEMANTIC_FIELDS or field in NON_FACET_SEMANTIC_FIELDS:
+                    continue
 
-            if field_type in {
-                "keyword",
-                "integer",
-                "long",
-                "float",
-                "boolean",
-                "date",
-            }:
-                facet_fields[field] = field_type
-                continue
+                field_type = spec.get("type")
 
-            if (
-                field_type == "text"
-                and "fields" in spec
-                and "keyword" in spec["fields"]
-                and field not in {"title"}
-            ):
-                facet_fields[field] = "text"
+                # Recurse into plain objects (but skip disabled objects and nested types)
+                if (
+                    "properties" in spec
+                    and field_type not in {"nested"}
+                    and spec.get("enabled", True) is not False
+                ):
+                    add_fields(spec["properties"], prefix=f"{field_path}.")
+                    continue
+
+                if field_type in {
+                    "keyword",
+                    "integer",
+                    "long",
+                    "float",
+                    "boolean",
+                    "date",
+                }:
+                    facet_fields[field_path] = field_type
+                    continue
+
+                if (
+                    field_type == "text"
+                    and "fields" in spec
+                    and "keyword" in spec["fields"]
+                    and field_path not in {"title"}
+                ):
+                    facet_fields[field_path] = "text"
+
+        add_fields(props)
 
         return facet_fields
 
