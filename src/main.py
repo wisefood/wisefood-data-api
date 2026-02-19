@@ -2,11 +2,17 @@ import os
 import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from routers.generic import install_error_handler
 import uvicorn
 import logsys
 from workers.embedding_worker import EmbeddingWorker
 
+origins = [
+    "https://wisefood.gr",
+    "http://localhost:3000",
+    "https://dev.wisefood.gr"
+]
 
 # Configuration context
 class Config:
@@ -101,6 +107,15 @@ api = FastAPI(
     root_path=config.settings["CONTEXT_PATH"],
     servers=[{"url": config.settings["CONTEXT_PATH"]}],
     lifespan=lifespan,
+)
+
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,            # list of allowed origins (or ["*"] for any origin)
+    allow_credentials=True,           # set True if you send cookies / Authorization headers
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],              # or list specific headers
+    expose_headers=["Content-Length"],# optionally expose headers to browser
 )
 
 # Initiliaze exception handlers
