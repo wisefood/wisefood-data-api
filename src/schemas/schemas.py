@@ -110,6 +110,22 @@ class LicenseId(str, Enum):
     CC_BY = "CC-BY-4.0"
     CC_BY_SA = "CC-BY-SA-4.0"
     Proprietary = "Proprietary"
+    CCBYNCSA = "CCBYNCSA"
+    CCBYNC = "CCBYNC"
+    CCBYNCND = "CCBYNCND"
+    CCBYSA = "CCBYSA"
+    CCBY = "CCBY"
+    CC0 = "CC0"
+    MIT_LOWERCASE = "mit"
+    GPL = "gpl"
+    PublisherSpecificOA = "publisher-specific-oa"
+    PublicDomain = "public-domain"
+    PD = "pd"
+    UnspecifiedOA = "unspecified-oa"
+    OtherOA = "other-oa"
+    ImpliedOA = "implied-oa"
+    PublisherSpecificManuscript = "publisher-specific, author manuscript"
+    ElsevierSpecificLicense = "elsevier-specific: oa user license"
 
 
 class BaseSchema(BaseModel):
@@ -377,12 +393,6 @@ class ArticleSchema(BaseSchema):
         description="Timestamp when the article was embedded",
     )
 
-    type: Literal["article"] = Field(
-        default="article",
-        description="Resource type discriminator",
-        exclude=True,
-    )
-
     # ----------------------------
     # Bibliographic & content
     # ----------------------------
@@ -431,6 +441,29 @@ class ArticleSchema(BaseSchema):
         description="Digital Object Identifier (DOI)",
     )
 
+    open_access: Optional[bool] = Field(
+        None, description="Whether the article is open access (if known)"
+    )
+
+    citation_count: Optional[int] = Field(
+        None,
+        description="Number of citations to the article",
+    )
+
+    reference_count: Optional[int] = Field(
+        None,
+        description="Number of references in the article",
+    )
+
+    influential_citation_count: Optional[int] = Field(
+        None,
+        description="Number of influential citations to the article",
+    )
+
+    type: Optional[str] = Field(
+        None, description="Type of the article (e.g., 'JournalArticle', 'Review')"
+    )
+
     # ----------------------------
     # Study metadata (structured, filterable)
     # ----------------------------
@@ -470,9 +503,9 @@ class ArticleSchema(BaseSchema):
     # ----------------------------
     # Human-authoritative classification
     # ----------------------------
-    tags: List[NonEmptyStr] = Field(
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
         default_factory=list,
-        description="Authoritative, reviewed topic tags",
+        description="Authoritative topic tags",
     )
 
     category: Optional[NonEmptyStr] = Field(
@@ -503,9 +536,11 @@ class ArticleSchema(BaseSchema):
         description="AI-derived article category",
     )
 
-    key_takeaways: List[NonEmptyStr] = Field(
+    key_takeaways: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=10)] = (
+        Field(
         default_factory=list,
-        description="Reviewed, authoritative key takeaways from the article",
+            description="Optional key takeaways written by the author/editor",
+        )
     )
 
     ai_key_takeaways: List[NonEmptyStr] = Field(
@@ -513,10 +548,10 @@ class ArticleSchema(BaseSchema):
         description="AI-generated key takeaways (not human-reviewed)",
     )
 
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        data["type"] = "article"
-        return data
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def validate_publication_year(cls, v):
+        return normalize_publication_year(v)
 
 
 class ArticleCreationSchema(BaseModel):
@@ -619,9 +654,28 @@ class ArticleCreationSchema(BaseModel):
         description="Digital Object Identifier (DOI)",
     )
 
-    license: Optional[LicenseId] = Field(
+    license: LicenseId | None = None
+    open_access: Optional[bool] = Field(
+        None, description="Whether the article is open access (if known)"
+    )
+
+    citation_count: Optional[int] = Field(
         None,
-        description="License identifier",
+        description="Number of citations to the article",
+    )
+
+    reference_count: Optional[int] = Field(
+        None,
+        description="Number of references in the article",
+    )
+
+    influential_citation_count: Optional[int] = Field(
+        None,
+        description="Number of influential citations to the article",
+    )
+
+    type: Optional[str] = Field(
+        None, description="Type of the article (e.g., 'JournalArticle', 'Review')"
     )
 
     organization_urn: Optional[UrnStr] = Field(
@@ -691,20 +745,42 @@ class ArticleUpdateSchema(BaseModel):
     )
     url: Optional[HttpUrl] = None
     license: Optional[LicenseId] = None
+    open_access: Optional[bool] = Field(
+        None, description="Whether the article is open access (if known)"
+    )
     abstract: Optional[NonEmptyAbstract] = None
     category: Optional[NonEmptyStr] = None
     authors: (
         Annotated[List[NonEmptyStr], Field(min_length=1, max_length=1000)] | None
     ) = None
-    publication_year: Optional[int] = Field(
-        default=None,
-        description="Publication year of the article (UTC)",
-    )
+    publication_year: Optional[date] = Field(None, description="Publication year")
     content: Optional[str] = None
-    venue: Optional[NonEmptyStr] = None
+    venue: Optional[NonEmptyStr] = Field(
+        None,
+        description="Venue where the article was published",
+    )
     organization_urn: Optional[UrnStr] = Field(
         None,
         description="URN of the publishing organization",
+    )
+
+    citation_count: Optional[int] = Field(
+        None,
+        description="Number of citations to the article",
+    )
+
+    reference_count: Optional[int] = Field(
+        None,
+        description="Number of references in the article",
+    )
+
+    influential_citation_count: Optional[int] = Field(
+        None,
+        description="Number of influential citations to the article",
+    )
+
+    type: Optional[str] = Field(
+        None, description="Type of the article (e.g., 'JournalArticle', 'Review')"
     )
 
     key_takeaways: (

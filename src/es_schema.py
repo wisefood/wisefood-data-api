@@ -315,6 +315,11 @@ def article_index(dim: int) -> Dict[str, Any]:
                 "external_id": {"type": "keyword"},
                 "url": {"type": "keyword"},
                 "license": {"type": "keyword"},
+                "open_access": {"type": "boolean"},
+                "citationCount": {"type": "integer"},
+                "referenceCount": {"type": "integer"},
+                "influentialCitationCount": {"type": "integer"},
+                "type": {"type": "keyword"},
                 "creator": {"type": "keyword"},
                 "status": {"type": "keyword"},
                 "created_at": {
