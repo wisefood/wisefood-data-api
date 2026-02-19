@@ -34,7 +34,7 @@ class EmbeddingQueue:
     def enqueue(self, job: Dict[str, Any]) -> str:
         job_id = job.get("job_id") or str(uuid.uuid4())
         job["job_id"] = job_id
-        enqueued_at = datetime.utcnow().isoformat()
+        enqueued_at = datetime.now().isoformat()
         status_doc = {
             "job_id": job_id,
             "status": "queued",

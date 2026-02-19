@@ -86,10 +86,10 @@ class Article(Entity):
             EMBEDDING_QUEUE.enqueue(
                 self.embed(article_dict["urn"], article_dict, creator)
             )
-            # 2) RAG chunks (rag_chunk_index)
-            EMBEDDING_QUEUE.enqueue(
-                self.embed_chunks(article_dict["urn"], article_dict, creator)
-            )
+            # 2) RAG chunks (rag_chunk_index) NB. Avoid it since we are not working with the content currently.
+            # EMBEDDING_QUEUE.enqueue(
+            #     self.embed_chunks(article_dict["urn"], article_dict, creator)
+            # )
         except Exception as e:
             logger.error(
                 "Failed to enqueue embedding for article %s: %s",
