@@ -182,9 +182,9 @@ class Article(Entity):
             EMBEDDING_QUEUE.enqueue(
                 self.embed(urn, None, enhancer)
             )
-            EMBEDDING_QUEUE.enqueue(
-                self.embed_chunks(urn, None, enhancer)
-            )
+            # EMBEDDING_QUEUE.enqueue(
+            #     self.embed_chunks(urn, None, enhancer)
+            # )
 
         # Invalidate cache, so next miss retrieves fresh data
         self.invalidate_cache(urn)
