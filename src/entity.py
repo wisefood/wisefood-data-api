@@ -325,7 +325,11 @@ class Entity:
         :param creator: The requesting user (if available) for audit metadata.
         :return: A dict containing job metadata.
         """
-        return self.enhance(urn, spec, creator)
+        identifier = self.get_identifier(urn)
+        result = self.enhance(identifier, spec, creator)
+        # Ensure cache is invalidated even if subclasses don't do it themselves.
+        self.invalidate_cache(identifier)
+        return result
 
     def enhance(
         self, urn: str, spec: Dict[str, Any], creator: Dict[str, Any] | None = None

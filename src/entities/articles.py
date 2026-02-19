@@ -151,7 +151,7 @@ class Article(Entity):
     def enhance(self, urn: str, spec: ArticleEnhancementSchema, enhancer=None) -> Dict[str, Any]:
 
         self.validate_existence(urn)
-        current = self.get(urn)
+        current = self.get_entity(urn)
 
         before = {}
         after = {}

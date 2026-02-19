@@ -186,7 +186,7 @@ class ElasticsearchClientSingleton:
         Append an AI enhancement event and update fields atomically.
         """
 
-        updated_at = updated_at or datetime.utcnow().isoformat()
+        updated_at = updated_at or datetime.now().isoformat()
 
         self.client.update(
             index=index_name,

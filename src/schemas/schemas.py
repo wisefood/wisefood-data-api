@@ -11,6 +11,7 @@ from pydantic import (
     HttpUrl,
     EmailStr,
     field_validator,
+    model_validator,
     StringConstraints,
     ConfigDict,
 )
@@ -810,6 +811,36 @@ class ArticleEnhancementSchema(BaseModel):
         ...,
         description="AI-derived fields keyed by allowed enhancement field names",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_backcompat_payload(cls, v: Any) -> Any:
+        """
+        Backwards-compatible request-body handling.
+
+        New shape:
+          {"agent": "...", "fields": {"ai_tags": [...], "ai_category": "..."}}
+
+        Legacy Wisefood client shape (wisefood-client sends flat kwargs):
+          {"agent": "...", "ai_tags": [...], "ai_category": "..."}
+        """
+        if not isinstance(v, dict):
+            return v
+
+        # If caller already sent nested fields, keep them but also fold in any
+        # top-level enhancement keys that were mistakenly sent.
+        if isinstance(v.get("fields"), dict):
+            merged_fields: Dict[str, Any] = dict(v["fields"])
+            for k, val in v.items():
+                if k in ("agent", "fields"):
+                    continue
+                merged_fields.setdefault(k, val)
+            return {"agent": v.get("agent"), "fields": merged_fields}
+
+        # Otherwise treat everything except `agent` as enhancement fields.
+        agent = v.get("agent")
+        flat_fields = {k: val for k, val in v.items() if k != "agent"}
+        return {"agent": agent, "fields": flat_fields}
 
     @field_validator("fields")
     @classmethod
