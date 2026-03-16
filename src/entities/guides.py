@@ -199,6 +199,12 @@ class Guide(Entity):
 
         if "region" in update_dict:
             GUIDELINE.sync_parent_metadata(urn)
+        if "status" in update_dict or "visibility" in update_dict:
+            GUIDELINE.sync_publication_state(
+                urn,
+                guide_status=merged_guide["status"],
+                guide_visibility=merged_guide["visibility"],
+            )
 
     def delete(self, urn: str) -> bool:
         if GUIDELINE.has_guidelines_for_guide(urn):

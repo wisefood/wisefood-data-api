@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 class Guideline(DependentEntity):
+    LOCKED_TEXT_FIELDS = {"rule_text"}
+
     def __init__(self):
         super().__init__(
             "guideline",
@@ -75,6 +77,31 @@ class Guideline(DependentEntity):
         ):
             raise ConflictError(
                 "Cannot attach or keep an unverified guideline under an active guide."
+            )
+
+    def _apply_activation_visibility(
+        self, guideline_dict: Dict[str, Any], guide: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if guideline_dict.get("status") == "active":
+            guide_is_published = (
+                guide.get("status") == "active" and guide.get("visibility") == "public"
+            )
+            guideline_dict["visibility"] = "public" if guide_is_published else "internal"
+        return guideline_dict
+
+    def _ensure_text_editable(
+        self, current: Dict[str, Any], guide: Dict[str, Any], update_dict: Dict[str, Any]
+    ) -> None:
+        if not self.LOCKED_TEXT_FIELDS.intersection(update_dict.keys()):
+            return
+
+        guide_is_published = (
+            guide.get("status") == "active" and guide.get("visibility") == "public"
+        )
+        if current.get("status") == "active" and guide_is_published:
+            raise ConflictError(
+                "Guideline text cannot be patched while the parent guide is published. "
+                "Unpublish the guide first."
             )
 
     def get(self, id_: str) -> Dict[str, Any]:
@@ -171,6 +198,7 @@ class Guideline(DependentEntity):
         guideline_dict = self._apply_verifier_metadata(
             guideline_dict, creator, review_status_explicit=True
         )
+        guideline_dict = self._apply_activation_visibility(guideline_dict, guide)
         validate_editorial_state(guideline_dict)
         self._ensure_parent_guide_allows_guideline_state(guide, guideline_dict)
 
@@ -205,6 +233,8 @@ class Guideline(DependentEntity):
         )
 
         guide = self._get_guide(current["guide_urn"])
+        self._ensure_text_editable(current, guide, update_dict)
+
         merged = {**current, **update_dict}
         merged["guide_urn"] = current["guide_urn"]
         merged["guide_region"] = guide.get("region")
@@ -217,6 +247,7 @@ class Guideline(DependentEntity):
             review_status_explicit="review_status" in update_dict,
             current_verifier_user_id=current.get("verifier_user_id"),
         )
+        merged = self._apply_activation_visibility(merged, guide)
 
         self._validate_sequence_no(
             current["guide_urn"], merged["sequence_no"], exclude_id=id_
@@ -285,6 +316,25 @@ class Guideline(DependentEntity):
         for guideline in self.fetch_for_guide(guide_urn=guide_urn):
             update_dict = self.upsert_system_fields(
                 {"id": guideline["id"], "guide_region": guide.get("region")},
+                update=True,
+            )
+            ELASTIC_CLIENT.update_entity(
+                index_name=self.collection_name, document=update_dict
+            )
+
+    def sync_publication_state(self, guide_urn: str, *, guide_status: str, guide_visibility: str) -> None:
+        guide_is_published = guide_status == "active" and guide_visibility == "public"
+
+        for guideline in self.fetch_for_guide(guide_urn=guide_urn):
+            if guideline.get("status") != "active":
+                continue
+
+            desired_visibility = "public" if guide_is_published else "internal"
+            if guideline.get("visibility") == desired_visibility:
+                continue
+
+            update_dict = self.upsert_system_fields(
+                {"id": guideline["id"], "visibility": desired_visibility},
                 update=True,
             )
             ELASTIC_CLIENT.update_entity(
