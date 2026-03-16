@@ -71,7 +71,11 @@ def api_create_guide(request: Request, g: GuideCreationSchema):
 )
 @render()
 def api_patch_guide(request: Request, urn: str, g: GuideUpdateSchema):
-    return GUIDE.patch_entity(urn, g.model_dump(mode="json", exclude_unset=True))
+    return GUIDE.patch_entity_with_actor(
+        urn,
+        g.model_dump(mode="json", exclude_unset=True),
+        actor=kutils.current_user(request),
+    )
 
 
 @router.delete(

@@ -122,11 +122,12 @@ api.add_middleware(
 install_error_handler(api)
 
 # import routers
-from routers import core, guides, artifacts, organizations, articles, fctables
+from routers import core, guides, guidelines, artifacts, organizations, articles, fctables
 
 
 # api.include_router(recipes.router)
 api.include_router(guides.router)
+api.include_router(guidelines.router)
 api.include_router(organizations.router)
 api.include_router(articles.router)
 api.include_router(fctables.router)

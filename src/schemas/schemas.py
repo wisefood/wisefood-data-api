@@ -104,6 +104,129 @@ class Status(str, Enum):
     deprecated = "deprecated"
 
 
+class ReviewStatus(str, Enum):
+    unreviewed = "unreviewed"
+    pending_review = "pending_review"
+    in_review = "in_review"
+    verified = "verified"
+    changes_requested = "changes_requested"
+    rejected = "rejected"
+
+
+class Visibility(str, Enum):
+    internal = "internal"
+    public = "public"
+
+
+class ApplicabilityStatus(str, Enum):
+    current = "current"
+    expired = "expired"
+    superseded = "superseded"
+    withdrawn = "withdrawn"
+    unknown = "unknown"
+
+
+class GuidelineActionType(str, Enum):
+    eat = "eat"
+    drink = "drink"
+    use = "use"
+    do = "do"
+    avoid = "avoid"
+    prepare = "prepare"
+    limit = "limit"
+    choose = "choose"
+    increase = "increase"
+    reduce = "reduce"
+
+
+class GuidelineFrequency(str, Enum):
+    per_meal = "per_meal"
+    daily = "daily"
+    weekly = "weekly"
+    monthly = "monthly"
+    occasional = "occasional"
+
+
+class GuidelineTargetPopulation(str, Enum):
+    general_population = "general_population"
+    infants = "infants"
+    under_5_years = "under_5_years"
+    ages_5_to_18 = "ages_5_to_18"
+    adults = "adults"
+    elderly = "elderly"
+    pregnant_people = "pregnant_people"
+    lactating_people = "lactating_people"
+    other = "other"
+
+
+class GuidelineFoodGroup(str, Enum):
+    none = "none"
+    fruits = "fruits"
+    vegetables = "vegetables"
+    grains = "grains"
+    dairy = "dairy"
+    protein_foods = "protein_foods"
+    fats_and_oils = "fats_and_oils"
+    beverages = "beverages"
+    salt = "salt"
+    sugars_and_sweets = "sugars_and_sweets"
+    mixed = "mixed"
+    other = "other"
+
+
+class QuantityOperator(str, Enum):
+    lt = "lt"
+    lte = "lte"
+    eq = "eq"
+    gte = "gte"
+    gt = "gt"
+    approx = "approx"
+
+
+def validate_editorial_state(
+    data: Dict[str, Any], *, partial: bool = False
+) -> Dict[str, Any]:
+    visibility = getattr(data.get("visibility"), "value", data.get("visibility"))
+    review_status = getattr(
+        data.get("review_status"), "value", data.get("review_status")
+    )
+    status = getattr(data.get("status"), "value", data.get("status"))
+    start = data.get("applicability_start_date")
+    end = data.get("applicability_end_date")
+
+    if start and end and end < start:
+        raise ValueError(
+            "applicability_end_date must be greater than or equal to applicability_start_date"
+        )
+
+    if visibility == Visibility.public.value:
+        if not partial or "review_status" in data:
+            if review_status != ReviewStatus.verified.value:
+                raise ValueError("public resources must have review_status='verified'")
+
+        if status in {Status.draft.value, Status.deleted.value}:
+            raise ValueError("public resources cannot have status 'draft' or 'deleted'")
+
+    return data
+
+
+def validate_guide_publication(data: Dict[str, Any], *, partial: bool = False) -> Dict[str, Any]:
+    publication_date = data.get("publication_date")
+    publication_year = data.get("publication_year")
+
+    if publication_date and publication_year and publication_date.year != publication_year:
+        raise ValueError("publication_year must match publication_date.year")
+
+    revision = data.get("revision")
+    if revision:
+        previous_guide_urn = revision.get("previous_guide_urn")
+        current_urn = data.get("urn")
+        if current_urn and previous_guide_urn and current_urn == previous_guide_urn:
+            raise ValueError("revision.previous_guide_urn cannot reference the same guide")
+
+    return data
+
+
 class LicenseId(str, Enum):
     MIT = "MIT"
     Apache2 = "Apache-2.0"
@@ -274,10 +397,118 @@ class GuideSchema(BaseSchema):
     content: str
     topic: str | None = None
     audience: str | None = None
+    short_title: Optional[NonEmptyStr] = Field(
+        None, description="Short display title for the guide"
+    )
+    issuing_authority: Optional[NonEmptyStr] = Field(
+        None, description="Authority that issued the guide"
+    )
+    responsible_ministry: Optional[NonEmptyStr] = Field(
+        None, description="Responsible ministry or department"
+    )
+    document_type: Optional[NonEmptyStr] = Field(
+        None, description="Type of guide document"
+    )
+    legal_status: Optional[NonEmptyStr] = Field(
+        None, description="Legal or institutional status of the guide"
+    )
+    target_audiences: List[NonEmptyStr] = Field(
+        default_factory=list, description="Structured target audiences for the guide"
+    )
+    graphical_model: Optional[NonEmptyStr] = Field(
+        None, description="Graphical dietary model used by the guide"
+    )
+    evidence_basis: Optional[NonEmptyStr] = Field(
+        None, description="Evidence basis used to develop the guide"
+    )
+    notes: Optional[NonEmptyAbstract] = Field(
+        None, description="Additional notes about the guide"
+    )
+    review_status: ReviewStatus = Field(
+        default=ReviewStatus.unreviewed,
+        description="Editorial review state for this guide",
+    )
+    verifier_user_id: Optional[NonEmptyStr] = Field(
+        None, description="User ID of the reviewer who verified the guide"
+    )
+    visibility: Visibility = Field(
+        default=Visibility.internal,
+        description="Whether the guide is internal-only or public",
+    )
+    applicability_status: ApplicabilityStatus = Field(
+        default=ApplicabilityStatus.unknown,
+        description="Real-world applicability state of the guide",
+    )
+    applicability_start_date: Optional[date] = Field(
+        None, description="Date when the guide became applicable"
+    )
+    applicability_end_date: Optional[date] = Field(
+        None, description="Date when the guide stopped being applicable"
+    )
     artifacts: List[ArtifactSchema] = Field(default_factory=list)
+    guidelines: List[UUID] = Field(
+        default_factory=list, description="List of linked guideline IDs"
+    )
     publication_year: Optional[int] = Field(
         None, description="Original publication year"
     )
+    revision: "GuideRevisionSchema | None" = Field(
+        None, description="Reference to an older guide revised by this one"
+    )
+    identifiers: List["GuideIdentifierSchema"] = Field(
+        default_factory=list, description="External identifiers linked to the guide"
+    )
+
+    @model_validator(mode="after")
+    def validate_workflow_and_publication(self):
+        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
+        validate_guide_publication(self.model_dump(mode="json", exclude_none=True))
+        return self
+
+
+class GuideRevisionSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    previous_guide_urn: Optional[UrnStr] = Field(
+        None, description="URN of the guide that this guide revises"
+    )
+    previous_guide_label: Optional[NonEmptyStr] = Field(
+        None, description="Legacy label when no guide URN exists"
+    )
+    previous_publication_year: Optional[int] = Field(
+        None, description="Publication year of the previous guide"
+    )
+
+    @model_validator(mode="after")
+    def validate_reference(self):
+        if not self.previous_guide_urn and not self.previous_guide_label:
+            raise ValueError(
+                "revision must include previous_guide_urn or previous_guide_label"
+            )
+        if self.previous_guide_urn and not self.previous_guide_urn.startswith("urn:guide:"):
+            raise ValueError("revision.previous_guide_urn must reference a guide URN")
+        return self
+
+
+class GuideIdentifierSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    scheme: NonEmptyStr = Field(..., description="Identifier scheme, e.g. doi or isbn")
+    value: NonEmptyStr = Field(..., description="Identifier value")
+    url: Optional[HttpUrl] = Field(None, description="Resolvable URL for the identifier")
+
+    @field_validator("scheme")
+    @classmethod
+    def normalize_scheme(cls, v: str) -> str:
+        return v.lower()
 
 
 class GuideCreationSchema(BaseModel):
@@ -319,6 +550,27 @@ class GuideCreationSchema(BaseModel):
     topic: str | None = None
     audience: str | None = None
     language: Union[Iso639_1, None] = None
+    short_title: Optional[NonEmptyStr] = None
+    issuing_authority: Optional[NonEmptyStr] = None
+    responsible_ministry: Optional[NonEmptyStr] = None
+    document_type: Optional[NonEmptyStr] = None
+    legal_status: Optional[NonEmptyStr] = None
+    target_audiences: List[NonEmptyStr] = Field(default_factory=list)
+    graphical_model: Optional[NonEmptyStr] = None
+    evidence_basis: Optional[NonEmptyStr] = None
+    notes: Optional[NonEmptyAbstract] = None
+    review_status: ReviewStatus = Field(default=ReviewStatus.unreviewed)
+    visibility: Visibility = Field(default=Visibility.internal)
+    applicability_status: ApplicabilityStatus = Field(
+        default=ApplicabilityStatus.unknown
+    )
+    applicability_start_date: Optional[date] = None
+    applicability_end_date: Optional[date] = None
+    publication_year: Optional[int] = Field(
+        None, description="Original publication year"
+    )
+    revision: GuideRevisionSchema | None = None
+    identifiers: List[GuideIdentifierSchema] = Field(default_factory=list)
     artifacts: List[ArtifactSchema] = Field(
         default_factory=list, description="List of associated artifacts"
     )
@@ -329,6 +581,12 @@ class GuideCreationSchema(BaseModel):
         if len(set(map(str.lower, v))) != len(v):
             raise ValueError("tags must be unique (case-insensitive)")
         return v
+
+    @model_validator(mode="after")
+    def validate_workflow_and_publication(self):
+        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
+        validate_guide_publication(self.model_dump(mode="json", exclude_none=True))
+        return self
 
 
 class GuideUpdateSchema(BaseModel):
@@ -355,6 +613,23 @@ class GuideUpdateSchema(BaseModel):
     audience: str | None = None
     language: Union[Iso639_1, None] = None
     artifacts: List[ArtifactSchema] | None = None
+    short_title: NonEmptyStr | None = None
+    issuing_authority: NonEmptyStr | None = None
+    responsible_ministry: NonEmptyStr | None = None
+    document_type: NonEmptyStr | None = None
+    legal_status: NonEmptyStr | None = None
+    target_audiences: List[NonEmptyStr] | None = None
+    graphical_model: NonEmptyStr | None = None
+    evidence_basis: NonEmptyStr | None = None
+    notes: NonEmptyAbstract | None = None
+    review_status: ReviewStatus | None = None
+    visibility: Visibility | None = None
+    applicability_status: ApplicabilityStatus | None = None
+    applicability_start_date: date | None = None
+    applicability_end_date: date | None = None
+    publication_year: int | None = None
+    revision: GuideRevisionSchema | None = None
+    identifiers: List[GuideIdentifierSchema] | None = None
     organization_urn: Optional[UrnStr] = Field(
         None, description="URN of the publishing organization"
     )
@@ -366,6 +641,208 @@ class GuideUpdateSchema(BaseModel):
         if v is not None and len(set(map(str.lower, v))) != len(v):
             raise ValueError("tags must be unique (case-insensitive)")
         return v
+
+    @model_validator(mode="after")
+    def validate_workflow_and_publication(self):
+        validate_editorial_state(
+            self.model_dump(mode="json", exclude_none=True), partial=True
+        )
+        validate_guide_publication(
+            self.model_dump(mode="json", exclude_none=True), partial=True
+        )
+        return self
+
+
+class GuidelineQuantitySchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    operator: QuantityOperator = Field(..., description="Comparison operator")
+    value: float = Field(..., description="Numeric quantity value")
+    unit: NonEmptyStr = Field(..., description="Measurement unit, e.g. g or servings")
+    period: Optional[NonEmptyStr] = Field(
+        None, description="Time period such as day, week, or meal"
+    )
+    raw_text: Optional[NonEmptyStr] = Field(
+        None, description="Original raw quantity string from the source"
+    )
+
+
+class GuidelineSourceReferenceSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    artifact_id: Optional[UUID] = Field(
+        None, description="Guide artifact ID that contains the referenced rule"
+    )
+    page_start: int = Field(..., ge=1, description="First page containing the rule")
+    page_end: Optional[int] = Field(
+        None, ge=1, description="Last page containing the rule"
+    )
+    section_label: Optional[NonEmptyStr] = Field(
+        None, description="Section label or heading in the source document"
+    )
+
+    @model_validator(mode="after")
+    def validate_page_range(self):
+        if self.page_end is None:
+            self.page_end = self.page_start
+        if self.page_end < self.page_start:
+            raise ValueError("page_end must be greater than or equal to page_start")
+        return self
+
+
+class GuidelineSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    id: UUID = Field(..., description="Internal UUID")
+    guide_urn: UrnStr = Field(..., description="URN of the parent guide")
+    guide_region: Optional[Iso3166_1a2] = Field(
+        None, description="Guide region inherited from the parent guide"
+    )
+    title: Optional[NonEmptyStr] = Field(
+        None, description="Short title or heading for the guideline"
+    )
+    rule_text: NonEmptyAbstract = Field(
+        ..., description="Full text of the dietary guideline"
+    )
+    sequence_no: int = Field(..., ge=1, description="Order of the guideline in the guide")
+    action_type: GuidelineActionType = Field(
+        ..., description="Normalized action category for the guideline"
+    )
+    target_populations: List[GuidelineTargetPopulation] = Field(
+        default_factory=list, description="Populations targeted by the guideline"
+    )
+    frequency: GuidelineFrequency | None = Field(
+        None, description="Suggested repetition frequency"
+    )
+    quantity: GuidelineQuantitySchema | None = Field(
+        None, description="Normalized quantitative recommendation, if present"
+    )
+    food_groups: List[GuidelineFoodGroup] = Field(
+        default_factory=list, description="Food groups referenced by the guideline"
+    )
+    source_refs: List[GuidelineSourceReferenceSchema] = Field(
+        default_factory=list,
+        description="Page-level references into the parent guide's artifacts",
+    )
+    notes: Optional[NonEmptyAbstract] = Field(
+        None, description="Additional notes about the guideline"
+    )
+    status: Status = Field(default=Status.active, description="Lifecycle status")
+    review_status: ReviewStatus = Field(
+        default=ReviewStatus.unreviewed,
+        description="Editorial review state for this guideline",
+    )
+    verifier_user_id: Optional[NonEmptyStr] = Field(
+        None, description="User ID of the reviewer who verified the guideline"
+    )
+    visibility: Visibility = Field(
+        default=Visibility.internal,
+        description="Whether the guideline is internal-only or public",
+    )
+    applicability_status: ApplicabilityStatus = Field(
+        default=ApplicabilityStatus.unknown,
+        description="Real-world applicability state of the guideline",
+    )
+    applicability_start_date: Optional[date] = Field(
+        None, description="Date when the guideline became applicable"
+    )
+    applicability_end_date: Optional[date] = Field(
+        None, description="Date when the guideline stopped being applicable"
+    )
+    creator: Optional[str] = Field(
+        None, description="Contact email for the creator/owner"
+    )
+    created_at: datetime = Field(..., description="Creation timestamp (UTC)")
+    updated_at: datetime = Field(..., description="Last-modified timestamp (UTC)")
+
+    @model_validator(mode="after")
+    def validate_workflow(self):
+        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
+        return self
+
+
+class GuidelineCreationSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    guide_urn: UrnStr = Field(..., description="URN of the parent guide")
+    title: Optional[NonEmptyStr] = None
+    rule_text: NonEmptyAbstract = Field(
+        ..., description="Full text of the dietary guideline"
+    )
+    sequence_no: int = Field(..., ge=1, description="Order of the guideline in the guide")
+    action_type: GuidelineActionType = Field(
+        ..., description="Normalized action category for the guideline"
+    )
+    target_populations: List[GuidelineTargetPopulation] = Field(default_factory=list)
+    frequency: GuidelineFrequency | None = None
+    quantity: GuidelineQuantitySchema | None = None
+    food_groups: List[GuidelineFoodGroup] = Field(default_factory=list)
+    source_refs: List[GuidelineSourceReferenceSchema] = Field(default_factory=list)
+    notes: Optional[NonEmptyAbstract] = None
+    status: Status = Field(default=Status.active, description="Lifecycle status")
+    review_status: ReviewStatus = Field(default=ReviewStatus.unreviewed)
+    visibility: Visibility = Field(default=Visibility.internal)
+    applicability_status: ApplicabilityStatus = Field(
+        default=ApplicabilityStatus.unknown
+    )
+    applicability_start_date: Optional[date] = None
+    applicability_end_date: Optional[date] = None
+
+    @model_validator(mode="after")
+    def validate_workflow(self):
+        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
+        return self
+
+
+class GuidelineUpdateSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    title: Optional[NonEmptyStr] = None
+    rule_text: Optional[NonEmptyAbstract] = None
+    sequence_no: Optional[int] = Field(None, ge=1)
+    action_type: GuidelineActionType | None = None
+    target_populations: List[GuidelineTargetPopulation] | None = None
+    frequency: GuidelineFrequency | None = None
+    quantity: GuidelineQuantitySchema | None = None
+    food_groups: List[GuidelineFoodGroup] | None = None
+    source_refs: List[GuidelineSourceReferenceSchema] | None = None
+    notes: Optional[NonEmptyAbstract] = None
+    status: Status | None = None
+    review_status: ReviewStatus | None = None
+    visibility: Visibility | None = None
+    applicability_status: ApplicabilityStatus | None = None
+    applicability_start_date: date | None = None
+    applicability_end_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_workflow(self):
+        validate_editorial_state(
+            self.model_dump(mode="json", exclude_none=True), partial=True
+        )
+        return self
+
+
+GuideSchema.model_rebuild()
 
 
 class GeographicContextSchema(BaseModel):

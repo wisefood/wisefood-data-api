@@ -7,6 +7,7 @@ from es_schema import (
     recipe_collection_index,
     article_index,
     guide_index,
+    guideline_index,
     organization_index,
     person_index,
     artifact_index,
@@ -58,6 +59,7 @@ NON_FACET_SEMANTIC_FIELDS = {
 
     # governance / audit
     "status",
+    "verifier_user_id",
     "license",
     "ai_generated_fields",
 }
@@ -100,6 +102,7 @@ class ElasticsearchClientSingleton:
 
         ensure_index("recipes", recipe_collection_index(ES_DIM))
         ensure_index("guides", guide_index(ES_DIM))
+        ensure_index("guidelines", guideline_index(ES_DIM))
         ensure_index("artifacts", artifact_index(ES_DIM))
         ensure_index("articles", article_index(ES_DIM))
         ensure_index("organizations", organization_index(ES_DIM))
@@ -157,18 +160,22 @@ class ElasticsearchClientSingleton:
         self.client.delete(index=index_name, id=urn, refresh="wait_for")
 
     def update_entity(self, index_name: str, document: Dict[str, Any]) -> None:
+        identifier = document.get("urn", document.get("id"))
+        if not identifier:
+            raise ValueError("document must include either 'urn' or 'id'")
+
         # Avoid updating if only system fields are present
-        if set(document.keys()) == {"updated_at", "urn"}:
+        if set(document.keys()) in ({"updated_at", "urn"}, {"updated_at", "id"}):
             return
 
-        existing = self.get_entity(index_name, document["urn"])
+        existing = self.get_entity(index_name, identifier)
         if not existing:
             return
 
         merged = {**existing, **document}
         self.client.update(
             index=index_name,
-            id=document["urn"],
+            id=identifier,
             doc=merged,
             refresh="wait_for",
         )

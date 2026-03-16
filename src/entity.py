@@ -1038,6 +1038,23 @@ class DependentEntity(Entity):
 
         return self.dump_schema.model_validate(obj).model_dump(mode="json")
 
+    def create_entity(self, spec, creator) -> Dict[str, Any]:
+        """
+        Create a dependent entity and resolve it by its generated UUID.
+
+        Dependent subclasses should either:
+        - return the created UUID from `create()`, or
+        - populate `spec["id"]` during creation.
+        """
+        identifier = self.create(spec, creator)
+        identifier = identifier or spec.get("id")
+        if not identifier:
+            raise DataError(
+                f"Dependent entity '{self.name}' create() must return the created UUID "
+                "or populate spec['id']."
+            )
+        return self.get_entity(identifier)
+
     # ---------- Parent existence helpers ----------
 
     def ensure_parent_exists(self, spec: Dict[str, Any]) -> None:
@@ -1108,16 +1125,16 @@ class DependentEntity(Entity):
         # Ensure the parent exists (fail fast)
         Entity.validate_existence(parent_urn)
 
-        qspec = {
-            "fq": [{self.parent_field: parent_urn}],
-            "size": limit or 100,
-            "offset": offset or 0,
-        }
+        qspec = SearchSchema.model_validate(
+            {
+                "fq": [f'{self.parent_field}:"{parent_urn}"'],
+                "limit": limit or 100,
+                "offset": offset or 0,
+            }
+        )
 
         results = ELASTIC_CLIENT.search_entities(
             index_name=self.collection_name, qspec=qspec
         )
-        return [
-            self.dump_schema.model_validate(obj).model_dump(mode="json")
-            for obj in results
-        ]
+        hits = results["results"] if isinstance(results, dict) else results
+        return [self.dump_schema.model_validate(obj).model_dump(mode="json") for obj in hits]

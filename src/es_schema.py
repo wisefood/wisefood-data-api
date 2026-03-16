@@ -214,6 +214,7 @@ def guide_index(dim: int) -> Dict[str, Any]:
                     "type": "date",
                     "format": "strict_date_optional_time||epoch_millis",
                 },
+                "publication_year": {"type": "integer"},
                 "organization_urn": {"type": "keyword"},
                 "title": {
                     "type": "text",
@@ -228,13 +229,43 @@ def guide_index(dim: int) -> Dict[str, Any]:
                         },
                     },
                 },
+                "short_title": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                },
                 "description": {
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
                 },
+                "issuing_authority": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                },
+                "responsible_ministry": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                },
                 "tags": {"type": "keyword"},
                 "status": {"type": "keyword"},
+                "review_status": {"type": "keyword"},
+                "verifier_user_id": {"type": "keyword"},
+                "visibility": {"type": "keyword"},
+                "applicability_status": {"type": "keyword"},
+                "applicability_start_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "applicability_end_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
                 "url": {"type": "keyword"},
                 "license": {"type": "keyword"},
                 "region": {"type": "keyword"},
@@ -247,6 +278,41 @@ def guide_index(dim: int) -> Dict[str, Any]:
                 },
                 "topic": {"type": "keyword"},
                 "audience": {"type": "keyword"},
+                "document_type": {"type": "keyword"},
+                "legal_status": {"type": "keyword"},
+                "target_audiences": {"type": "keyword"},
+                "graphical_model": {"type": "keyword"},
+                "evidence_basis": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "notes": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "revision": {
+                    "properties": {
+                        "previous_guide_urn": {"type": "keyword"},
+                        "previous_guide_label": {
+                            "type": "text",
+                            "analyzer": "default_text",
+                            "search_analyzer": "default_text",
+                            "fields": {"keyword": {"type": "keyword"}},
+                        },
+                        "previous_publication_year": {"type": "integer"},
+                    }
+                },
+                "identifiers": {
+                    "type": "nested",
+                    "properties": {
+                        "scheme": {"type": "keyword"},
+                        "value": {"type": "keyword"},
+                        "url": {"type": "keyword"},
+                    },
+                },
+                "guidelines": {"type": "keyword"},
                 "type": {"type": "keyword"},
                 # Nested artifacts (denormalized)
                 "artifacts": {
@@ -292,6 +358,95 @@ def guide_index(dim: int) -> Dict[str, Any]:
                     "enabled": False,
                 },
 
+            }
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Guideline index
+# ---------------------------------------------------------------------------
+
+
+def guideline_index(dim: int) -> Dict[str, Any]:
+    del dim
+    return {
+        "settings": DEFAULT_SETTINGS,
+        "mappings": {
+            "properties": {
+                "id": {"type": "keyword"},
+                "guide_urn": {"type": "keyword"},
+                "guide_region": {"type": "keyword"},
+                "title": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                },
+                "rule_text": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "sequence_no": {"type": "integer"},
+                "action_type": {"type": "keyword"},
+                "target_populations": {"type": "keyword"},
+                "frequency": {"type": "keyword"},
+                "food_groups": {"type": "keyword"},
+                "quantity": {
+                    "properties": {
+                        "operator": {"type": "keyword"},
+                        "value": {"type": "float"},
+                        "unit": {"type": "keyword"},
+                        "period": {"type": "keyword"},
+                        "raw_text": {
+                            "type": "text",
+                            "analyzer": "default_text",
+                            "search_analyzer": "default_text",
+                        },
+                    }
+                },
+                "source_refs": {
+                    "type": "nested",
+                    "properties": {
+                        "artifact_id": {"type": "keyword"},
+                        "page_start": {"type": "integer"},
+                        "page_end": {"type": "integer"},
+                        "section_label": {
+                            "type": "text",
+                            "analyzer": "default_text",
+                            "search_analyzer": "default_text",
+                            "fields": {"keyword": {"type": "keyword"}},
+                        },
+                    },
+                },
+                "notes": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "status": {"type": "keyword"},
+                "review_status": {"type": "keyword"},
+                "verifier_user_id": {"type": "keyword"},
+                "visibility": {"type": "keyword"},
+                "applicability_status": {"type": "keyword"},
+                "applicability_start_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "applicability_end_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "creator": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
             }
         },
     }
