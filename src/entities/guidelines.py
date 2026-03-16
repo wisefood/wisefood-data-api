@@ -268,7 +268,9 @@ class Guideline(DependentEntity):
             index_name=self.collection_name, qspec=qspec
         )
         return [
-            self.dump_schema.model_validate(obj).model_dump(mode="json")
+            self.dump_schema.model_validate(
+                self._strip_search_metadata(obj)
+            ).model_dump(mode="json")
             for obj in response["results"]
         ]
 

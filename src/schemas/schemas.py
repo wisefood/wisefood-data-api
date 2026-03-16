@@ -214,12 +214,27 @@ def validate_guide_publication(data: Dict[str, Any], *, partial: bool = False) -
     publication_date = data.get("publication_date")
     publication_year = data.get("publication_year")
 
+    if isinstance(publication_date, str):
+        try:
+            publication_date = datetime.fromisoformat(
+                publication_date.replace("Z", "+00:00")
+            )
+        except ValueError:
+            publication_date = date.fromisoformat(publication_date)
+
+    if isinstance(publication_year, str):
+        publication_year = int(publication_year)
+
     if publication_date and publication_year and publication_date.year != publication_year:
         raise ValueError("publication_year must match publication_date.year")
 
     revision = data.get("revision")
     if revision:
-        previous_guide_urn = revision.get("previous_guide_urn")
+        previous_guide_urn = (
+            revision.get("previous_guide_urn")
+            if isinstance(revision, dict)
+            else getattr(revision, "previous_guide_urn", None)
+        )
         current_urn = data.get("urn")
         if current_urn and previous_guide_urn and current_urn == previous_guide_urn:
             raise ValueError("revision.previous_guide_urn cannot reference the same guide")
@@ -445,6 +460,9 @@ class GuideSchema(BaseSchema):
     applicability_end_date: Optional[date] = Field(
         None, description="Date when the guide stopped being applicable"
     )
+    publication_date: Optional[datetime] = Field(
+        None, description="Original publication date (UTC)"
+    )
     artifacts: List[ArtifactSchema] = Field(default_factory=list)
     guidelines: List[UUID] = Field(
         default_factory=list, description="List of linked guideline IDs"
@@ -461,8 +479,8 @@ class GuideSchema(BaseSchema):
 
     @model_validator(mode="after")
     def validate_workflow_and_publication(self):
-        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
-        validate_guide_publication(self.model_dump(mode="json", exclude_none=True))
+        validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
+        validate_guide_publication(self.model_dump(mode="python", exclude_none=True))
         return self
 
 
@@ -584,8 +602,8 @@ class GuideCreationSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_workflow_and_publication(self):
-        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
-        validate_guide_publication(self.model_dump(mode="json", exclude_none=True))
+        validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
+        validate_guide_publication(self.model_dump(mode="python", exclude_none=True))
         return self
 
 
@@ -645,10 +663,10 @@ class GuideUpdateSchema(BaseModel):
     @model_validator(mode="after")
     def validate_workflow_and_publication(self):
         validate_editorial_state(
-            self.model_dump(mode="json", exclude_none=True), partial=True
+            self.model_dump(mode="python", exclude_none=True), partial=True
         )
         validate_guide_publication(
-            self.model_dump(mode="json", exclude_none=True), partial=True
+            self.model_dump(mode="python", exclude_none=True), partial=True
         )
         return self
 
@@ -769,7 +787,7 @@ class GuidelineSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_workflow(self):
-        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
+        validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
         return self
 
 
@@ -806,7 +824,7 @@ class GuidelineCreationSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_workflow(self):
-        validate_editorial_state(self.model_dump(mode="json", exclude_none=True))
+        validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
         return self
 
 
@@ -837,7 +855,7 @@ class GuidelineUpdateSchema(BaseModel):
     @model_validator(mode="after")
     def validate_workflow(self):
         validate_editorial_state(
-            self.model_dump(mode="json", exclude_none=True), partial=True
+            self.model_dump(mode="python", exclude_none=True), partial=True
         )
         return self
 

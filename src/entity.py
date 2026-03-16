@@ -197,6 +197,13 @@ class Entity:
             except Exception as e:
                 logging.error(f"Failed to cache entity {urn}: {e}")
 
+    @staticmethod
+    def _strip_search_metadata(obj: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove Elasticsearch response metadata fields before schema validation.
+        """
+        return {k: v for k, v in obj.items() if not k.startswith("_")}
+
     def invalidate_cache(self, urn: str) -> None:
         """
         Invalidate the cache for the entity.
@@ -239,7 +246,9 @@ class Entity:
             obj = self.get(urn)
             self.cache(urn, obj)
 
-        return self.dump_schema.model_validate(obj).model_dump(mode="json")
+        return self.dump_schema.model_validate(
+            self._strip_search_metadata(obj)
+        ).model_dump(mode="json")
 
     def get_entity(self, urn: str) -> Dict[str, Any]:
         """
@@ -1036,7 +1045,9 @@ class DependentEntity(Entity):
             obj = self.get(identifier)
             self.cache(identifier, obj)
 
-        return self.dump_schema.model_validate(obj).model_dump(mode="json")
+        return self.dump_schema.model_validate(
+            self._strip_search_metadata(obj)
+        ).model_dump(mode="json")
 
     def create_entity(self, spec, creator) -> Dict[str, Any]:
         """
@@ -1137,4 +1148,9 @@ class DependentEntity(Entity):
             index_name=self.collection_name, qspec=qspec
         )
         hits = results["results"] if isinstance(results, dict) else results
-        return [self.dump_schema.model_validate(obj).model_dump(mode="json") for obj in hits]
+        return [
+            self.dump_schema.model_validate(
+                self._strip_search_metadata(obj)
+            ).model_dump(mode="json")
+            for obj in hits
+        ]
