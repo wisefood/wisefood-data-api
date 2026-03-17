@@ -6,6 +6,7 @@ They do not own artifacts directly; any source references must point to artifact
 already attached to the parent guide.
 """
 
+import re
 from typing import Dict, Any, List, Optional
 
 import logging
@@ -32,6 +33,29 @@ logger = logging.getLogger(__name__)
 
 class Guideline(DependentEntity):
     LOCKED_TEXT_FIELDS = {"rule_text"}
+    DEFAULT_ACTION_TYPE = "do"
+    ACTION_TYPE_PREFIXES = {
+        "eat": "eat",
+        "consume": "eat",
+        "include": "eat",
+        "drink": "drink",
+        "use": "use",
+        "do": "do",
+        "follow": "do",
+        "avoid": "avoid",
+        "prevent": "avoid",
+        "prepare": "prepare",
+        "cook": "prepare",
+        "limit": "limit",
+        "restrict": "limit",
+        "choose": "choose",
+        "select": "choose",
+        "increase": "increase",
+        "boost": "increase",
+        "reduce": "reduce",
+        "decrease": "reduce",
+        "lower": "reduce",
+    }
 
     def __init__(self):
         super().__init__(
@@ -191,6 +215,49 @@ class Guideline(DependentEntity):
                 f"Guide {guide_urn} already has a guideline with sequence_no {sequence_no}."
             )
 
+    def _next_sequence_no(self, guide_urn: str) -> int:
+        qspec = SearchSchema.model_validate(
+            {
+                "limit": 1,
+                "offset": 0,
+                "fq": [f'guide_urn:"{guide_urn}"', "NOT status:deleted"],
+                "sort": "sequence_no desc",
+            }
+        )
+        response = ELASTIC_CLIENT.search_entities(
+            index_name=self.collection_name, qspec=qspec
+        )
+        results = response.get("results", [])
+        if not results:
+            return 1
+        return int(results[0].get("sequence_no", 0)) + 1
+
+    def _default_title(self, rule_text: str) -> str:
+        return rule_text[:2000]
+
+    def _infer_action_type(self, rule_text: str) -> str:
+        for token in re.findall(r"[a-z]+", rule_text.lower()):
+            action_type = self.ACTION_TYPE_PREFIXES.get(token)
+            if action_type:
+                return action_type
+        return self.DEFAULT_ACTION_TYPE
+
+    def _apply_creation_defaults(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        hydrated = dict(spec)
+        rule_text = hydrated.get("rule_text")
+        guide_urn = hydrated.get("guide_urn")
+
+        if rule_text and not hydrated.get("title"):
+            hydrated["title"] = self._default_title(rule_text)
+
+        if hydrated.get("sequence_no") is None and guide_urn:
+            hydrated["sequence_no"] = self._next_sequence_no(guide_urn)
+
+        if hydrated.get("action_type") is None and rule_text:
+            hydrated["action_type"] = self._infer_action_type(rule_text)
+
+        return hydrated
+
     def _normalize_source_refs(
         self, guide_urn: str, source_refs: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -230,6 +297,8 @@ class Guideline(DependentEntity):
         return normalized_refs
 
     def create(self, spec, creator: dict) -> str:
+        spec = self._apply_creation_defaults(spec)
+
         try:
             guideline_data = self.creation_schema.model_validate(spec)
         except Exception as e:

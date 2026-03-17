@@ -810,14 +810,16 @@ class GuidelineCreationSchema(BaseModel):
     rule_text: NonEmptyAbstract = Field(
         ..., description="Full text of the dietary guideline"
     )
-    sequence_no: int = Field(..., ge=1, description="Order of the guideline in the guide")
+    sequence_no: Optional[int] = Field(
+        None, ge=1, description="Order of the guideline in the guide"
+    )
     page_no: int | None = Field(
         None,
         ge=1,
         description="Page number in the parent guide PDF where the guideline originates",
     )
-    action_type: GuidelineActionType = Field(
-        ..., description="Normalized action category for the guideline"
+    action_type: GuidelineActionType | None = Field(
+        None, description="Normalized action category for the guideline"
     )
     target_populations: List[GuidelineTargetPopulation] = Field(default_factory=list)
     frequency: GuidelineFrequency | None = None
@@ -825,7 +827,7 @@ class GuidelineCreationSchema(BaseModel):
     food_groups: List[GuidelineFoodGroup] = Field(default_factory=list)
     source_refs: List[GuidelineSourceReferenceSchema] = Field(default_factory=list)
     notes: Optional[NonEmptyAbstract] = None
-    status: Status = Field(default=Status.active, description="Lifecycle status")
+    status: Status = Field(default=Status.draft, description="Lifecycle status")
     review_status: ReviewStatus = Field(default=ReviewStatus.unreviewed)
     visibility: Visibility = Field(default=Visibility.internal)
     applicability_status: ApplicabilityStatus = Field(

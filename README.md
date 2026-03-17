@@ -60,6 +60,13 @@ Guidelines are dependent records stored in a separate collection and linked to a
 - food groups
 - page-level source references back to artifacts
 
+When creating guidelines through the API, the backend can now normalize lightweight draft payloads by deriving:
+
+- `title` from `rule_text`
+- `sequence_no` from the next available slot within the parent guide
+- `action_type` from the rule text, with a safe fallback
+- `status` as `draft` unless the caller explicitly sets something else
+
 ### Articles
 
 Articles store scientific or technical content together with structured metadata. They also support:
