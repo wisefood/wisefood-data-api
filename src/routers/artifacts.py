@@ -53,6 +53,16 @@ def api_create_artifact(request: Request, a: ArtifactCreationSchema):
     )
 
 
+@router.get(
+    "/{id}/presign",
+    summary="Get presigned artifact URL",
+    description="Generate a temporary presigned download URL when the artifact points to an S3 object.",
+)
+@render()
+def api_presign_artifact(request: Request, id: str, viewer: dict = Depends(auth())):
+    return ARTIFACT.presign(id, viewer=viewer)
+
+
 @router.post(
     "/upload",
     dependencies=[Depends(auth(("admin", "expert")))],

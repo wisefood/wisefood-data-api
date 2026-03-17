@@ -1,4 +1,5 @@
 
+from datetime import timedelta
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from backend.redis import REDIS
@@ -55,6 +56,9 @@ class Artifact(Entity):
         )
         self.BUCKET_NAME = config.settings.get("MINIO_BUCKET")
         self.MAX_FILE_SIZE = 1_073_741_824
+        self.PRESIGNED_URL_EXPIRY_SECONDS = config.settings.get(
+            "MINIO_PRESIGNED_URL_EXPIRY_SECONDS", 3600
+        )
 
     def list(
         self, limit: Optional[int] = None, offset: Optional[int] = None
@@ -155,6 +159,37 @@ class Artifact(Entity):
         )
         return entity
 
+    @staticmethod
+    def _parse_s3_url(s3_url: str | None, artifact_id: str) -> tuple[str, str]:
+        if not s3_url or not s3_url.startswith("s3://"):
+            raise DataError(
+                f"Artifact {artifact_id} does not reference an S3 object."
+            )
+
+        parts = s3_url[5:].split("/", 1)
+        bucket_name = parts[0].strip()
+        object_name = parts[1].strip() if len(parts) > 1 else ""
+
+        if not bucket_name or not object_name:
+            raise DataError(f"Invalid S3 URL for artifact {artifact_id}.")
+
+        return bucket_name, object_name
+
+    def _get_storage_client(self):
+        try:
+            return MINIO_CLIENT()
+        except Exception as e:
+            logger.error(f"Failed to get MinIO client: {e}")
+            raise InternalError(f"Failed to initialize storage client: {e}")
+
+    def _get_presign_expiry_seconds(self) -> int:
+        expires_in = int(self.PRESIGNED_URL_EXPIRY_SECONDS)
+        if expires_in <= 0 or expires_in > 604800:
+            raise InternalError(
+                "MINIO_PRESIGNED_URL_EXPIRY_SECONDS must be between 1 and 604800."
+            )
+        return expires_in
+
     def create_entity(self, spec, creator) -> Dict[str, Any]:
         """
         Create a new entity bundler method.
@@ -214,20 +249,13 @@ class Artifact(Entity):
         if artifact is None:
             raise NotFoundError(f"Artifact with ID {id} not found.")
 
-        try:
-            minio_client = MINIO_CLIENT()
-        except Exception as e:
-            logger.error(f"Failed to get MinIO client: {e}")
-            raise InternalError(f"Failed to initialize storage client: {e}")
+        minio_client = self._get_storage_client()
 
         # Extract bucket and object name from file_s3_url
         try:
-            s3_url = artifact.get("file_s3_url")
-            if not s3_url or not s3_url.startswith("s3://"):
-                raise DataError(f"Invalid S3 URL for artifact {id}.")
-            parts = s3_url[5:].split("/", 1)
-            bucket_name = parts[0]
-            object_name = parts[1] if len(parts) > 1 else ""
+            bucket_name, object_name = self._parse_s3_url(
+                artifact.get("file_s3_url"), id
+            )
         except Exception as e:
             raise DataError(f"Failed to parse S3 URL for artifact {id}: {e}")
 
@@ -236,13 +264,58 @@ class Artifact(Entity):
             # Don't read() or close() - return the response object directly
             
             filename = artifact.get("filename", object_name.split("/")[-1])
-            content_type = artifact.get("content_type", "application/octet-stream")
+            content_type = artifact.get("file_type", "application/octet-stream")
             
             return response, filename, content_type
             
         except S3Error as e:
             logger.error(f"Failed to download file from MinIO: {e}")
             raise InternalError(f"Failed to download file from storage: {e}")
+
+    def presign(
+        self,
+        id: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Generate a temporary presigned URL for the file associated with the artifact.
+
+        :param id: The ID of the artifact.
+        :return: Dict with the presigned URL and expiry information.
+        """
+        artifact = self.get(
+            id,
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
+
+        try:
+            bucket_name, object_name = self._parse_s3_url(
+                artifact.get("file_s3_url"), id
+            )
+        except Exception as e:
+            raise DataError(f"Failed to parse S3 URL for artifact {id}: {e}")
+
+        expires_in = self._get_presign_expiry_seconds()
+        minio_client = self._get_storage_client()
+
+        try:
+            url = minio_client.presigned_get_object(
+                bucket_name,
+                object_name,
+                expires=timedelta(seconds=expires_in),
+            )
+        except S3Error as e:
+            logger.error(f"Failed to presign file from MinIO: {e}")
+            raise InternalError(f"Failed to presign file from storage: {e}")
+
+        return {
+            "artifact_id": str(artifact["id"]),
+            "url": url,
+            "expires_in": expires_in,
+        }
         
         
     def upload(
@@ -297,11 +370,7 @@ class Artifact(Entity):
         
         # Use ROOT client for uploads (has write permissions)
         # Personalized client would be for user-specific file access
-        try:
-            minio_client = MINIO_CLIENT()
-        except Exception as e:
-            logger.error(f"Failed to get MinIO client: {e}")
-            raise InternalError(f"Failed to initialize storage client: {e}")
+        minio_client = self._get_storage_client()
         
         # Create organized object path
         # Format: parent_type/parent_id/filename

@@ -47,6 +47,9 @@ class Config:
             "MINIO_EXT_URL_API", "https://s3.wisefood.gr"
         )
         self.settings["MINIO_BUCKET"] = os.getenv("MINIO_BUCKET", "catalog")
+        self.settings["MINIO_PRESIGNED_URL_EXPIRY_SECONDS"] = int(
+            os.getenv("MINIO_PRESIGNED_URL_EXPIRY_SECONDS", 3600)
+        )
         self.settings["KEYCLOAK_URL"] = os.getenv(
             "KEYCLOAK_URL", "http://keycloak:8080"
         )

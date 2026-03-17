@@ -155,6 +155,7 @@ Artifacts connect file storage to structured catalog resources. The service supp
 - metadata-only artifact creation
 - file upload to MinIO
 - artifact download
+- artifact presigned URL generation for S3-backed files
 - linking artifacts to guides, articles, and food composition tables
 
 Guidelines themselves do not own artifacts directly; instead, they point to pages or sections inside artifacts attached to their parent guide.
@@ -277,7 +278,7 @@ The application exposes the following route groups:
 - `/api/v1/articles`
   Article CRUD, search, and AI enhancement
 - `/api/v1/artifacts`
-  Artifact creation, upload, get, and download
+  Artifact creation, upload, get, download, and S3 presign
 - `/api/v1/organizations`
   Organization create/read/update/search
 - `/api/v1/fctables`
