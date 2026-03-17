@@ -15,23 +15,21 @@ router = APIRouter(prefix="/api/v1/artifacts", tags=["Artifact Management Operat
 
 @router.get(
     "/{id}",
-    dependencies=[Depends(auth())],
     summary="Get artifact details",
     description="Retrieve details of a specific artifact by its ID.",
 )
 @render()
-def api_get_artifact(request: Request, id: str):
-    return ARTIFACT.get_entity(id)
+def api_get_artifact(request: Request, id: str, viewer: dict = Depends(auth())):
+    return ARTIFACT.get(id, viewer=viewer)
 
 
 @router.get(
     "/{id}/download",
-    dependencies=[Depends(auth())],
     summary="Download artifact",
     description="Download the file associated with a specific artifact by its ID.",
 )
-def api_download_artifact(request: Request, id: str):
-    response_obj, filename, content_type = ARTIFACT.download(id)
+def api_download_artifact(request: Request, id: str, viewer: dict = Depends(auth())):
+    response_obj, filename, content_type = ARTIFACT.download(id, viewer=viewer)
     
     return StreamingResponse(
         response_obj,
@@ -44,7 +42,7 @@ def api_download_artifact(request: Request, id: str):
 
 @router.post(
     "",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Create a new artifact",
     description="Create a new artifact in the system using the provided data.",
 )
@@ -57,7 +55,7 @@ def api_create_artifact(request: Request, a: ArtifactCreationSchema):
 
 @router.post(
     "/upload",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Upload a file and create an artifact",
     description="Upload a file to the system and create an associated artifact. Maximum file size is 1GB.",
 )
@@ -104,7 +102,7 @@ async def api_upload_artifact(
 
 @router.patch(
     "/{id}",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Update artifact details",
     description="Update the details of an existing artifact by its ID.",
 )
@@ -115,7 +113,7 @@ def api_patch_artifact(request: Request, id: str, a: ArtifactUpdateSchema):
 
 @router.delete(
     "/{id}",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Delete an artifact",
     description="Delete an artifact from the system by its ID.",
 )

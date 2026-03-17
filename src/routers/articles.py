@@ -54,7 +54,7 @@ def api_get_article(request: Request, urn: str):
 
 @router.post(
     "",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert", "agent")))],
     summary="Create a new article",
     description="Create a new article in the system using the provided data.",
 )
@@ -78,7 +78,7 @@ def api_search_articles(request: Request, q: SearchSchema):
 
 @router.patch(
     "/{urn}",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert", "agent")))],
     summary="Update article details",
     description="Update the details of an existing article by its ID.",
 )
@@ -89,7 +89,7 @@ def api_patch_article(request: Request, urn: str, a: ArticleUpdateSchema):
 
 @router.patch(
     "/{urn}/enhance",
-    dependencies=[Depends(auth("agent, admin"))],
+    dependencies=[Depends(auth(("admin", "expert", "agent")))],
     summary="Enhance an article",
     description="Apply AI-generated enhancements to an article by its URN.",
 )
@@ -99,7 +99,7 @@ def api_enhance_article(request: Request, urn: str, a: ArticleEnhancementSchema)
 
 @router.delete(
     "/{urn}",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert", "agent")))],
     summary="Delete an article",
     description="Delete an article from the system by its URN.",
 )

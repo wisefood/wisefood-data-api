@@ -11,64 +11,79 @@ router = APIRouter(prefix="/api/v1/guidelines", tags=["Dietary Guideline Operati
 
 @router.get(
     "",
-    dependencies=[Depends(auth())],
     summary="List dietary guidelines",
     description="Retrieve a paginated list of dietary guideline IDs from the database.",
 )
 @render()
-def api_list_guidelines(request: Request, limit: int = 100, offset: int = 0):
-    return GUIDELINE.list_entities(limit=limit, offset=offset)
+def api_list_guidelines(
+    request: Request,
+    limit: int = 100,
+    offset: int = 0,
+    viewer: dict = Depends(auth()),
+):
+    return GUIDELINE.list(limit=limit, offset=offset, viewer=viewer)
 
 
 @router.get(
     "/fetch",
-    dependencies=[Depends(auth())],
     summary="Fetch dietary guidelines",
     description="Fetch a paginated collection of dietary guidelines with detailed information.",
 )
 @render()
-def api_fetch_guidelines(request: Request, limit: int = 100, offset: int = 0):
-    return GUIDELINE.fetch_entities(limit=limit, offset=offset)
+def api_fetch_guidelines(
+    request: Request,
+    limit: int = 100,
+    offset: int = 0,
+    viewer: dict = Depends(auth()),
+):
+    return GUIDELINE.fetch(limit=limit, offset=offset, viewer=viewer)
 
 
 @router.post(
     "/search",
-    dependencies=[Depends(auth())],
     summary="Search dietary guidelines",
     description="Search for dietary guidelines based on query parameters and filters.",
 )
 @render()
-def api_search_guidelines(request: Request, q: SearchSchema):
-    return GUIDELINE.search_entities(query=q)
+def api_search_guidelines(
+    request: Request, q: SearchSchema, viewer: dict = Depends(auth())
+):
+    return GUIDELINE.search(
+        query=q.model_dump(mode="json", exclude_none=True), viewer=viewer
+    )
 
 
 @router.get(
     "/by-guide/{guide_urn}",
-    dependencies=[Depends(auth())],
     summary="Fetch guidelines for a guide",
     description="Retrieve all dietary guidelines linked to a specific guide URN.",
 )
 @render()
 def api_fetch_guide_guidelines(
-    request: Request, guide_urn: str, limit: int = 1000, offset: int = 0
+    request: Request,
+    guide_urn: str,
+    limit: int = 1000,
+    offset: int = 0,
+    viewer: dict = Depends(auth()),
 ):
-    return GUIDELINE.fetch_for_guide(guide_urn=guide_urn, limit=limit, offset=offset)
+    return GUIDELINE.fetch_for_guide(
+        guide_urn=guide_urn, limit=limit, offset=offset, viewer=viewer
+    )
 
 
 @router.get(
     "/{id}",
-    dependencies=[Depends(auth())],
     summary="Get dietary guideline by ID",
     description="Retrieve a specific dietary guideline by its UUID.",
 )
 @render()
-def api_get_guideline(request: Request, id: str):
-    return GUIDELINE.get_entity(id)
+def api_get_guideline(request: Request, id: str, viewer: dict = Depends(auth())):
+    return GUIDELINE.get(id, viewer=viewer)
 
 
 @router.post(
     "",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Create dietary guideline",
     description="Create a new dietary guideline linked to a guide.",
 )
@@ -81,7 +96,7 @@ def api_create_guideline(request: Request, g: GuidelineCreationSchema):
 
 @router.patch(
     "/{id}",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Update dietary guideline",
     description="Partially update an existing dietary guideline identified by UUID.",
 )
@@ -96,7 +111,7 @@ def api_patch_guideline(request: Request, id: str, g: GuidelineUpdateSchema):
 
 @router.delete(
     "/{id}",
-    dependencies=[Depends(auth())],
+    dependencies=[Depends(auth(("admin", "expert")))],
     summary="Delete dietary guideline",
     description="Delete a dietary guideline from the system by its UUID.",
 )
