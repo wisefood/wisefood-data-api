@@ -389,6 +389,7 @@ def guideline_index(dim: int) -> Dict[str, Any]:
                     "search_analyzer": "default_text",
                 },
                 "sequence_no": {"type": "integer"},
+                "page_no": {"type": "integer"},
                 "action_type": {"type": "keyword"},
                 "target_populations": {"type": "keyword"},
                 "frequency": {"type": "keyword"},

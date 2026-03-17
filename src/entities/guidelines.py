@@ -346,33 +346,54 @@ class Guideline(DependentEntity):
         include_unapproved: bool = False,
     ) -> List[Dict[str, Any]]:
         """Fetch visible guidelines for a guide, hiding the whole set if the guide is hidden."""
+        response = self.search_for_guide(
+            guide_urn=guide_urn,
+            query={
+                "limit": limit,
+                "offset": offset,
+                "sort": "sequence_no asc",
+            },
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
+        return response["results"]
+
+    def search_for_guide(
+        self,
+        guide_urn: str,
+        query: Dict[str, Any],
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ):
+        """Search guidelines scoped to a single guide with pagination, filters, and facets."""
         guide = self._get_guide(guide_urn)
         if not self._viewer_can_access_all(
             viewer, include_unapproved=include_unapproved
         ) and not is_approved_or_active(guide):
             raise NotFoundError(f"Guide with URN {guide_urn} not found.")
 
-        qspec = SearchSchema.model_validate(
-            self._apply_viewer_filter(
-                {
-                    "limit": limit,
-                    "offset": offset,
-                    "fq": [f'guide_urn:"{guide_urn}"', "NOT status:deleted"],
-                    "sort": "sequence_no asc",
-                },
+        scoped_query = dict(query)
+        fq = [f'guide_urn:"{guide_urn}"', *(scoped_query.get("fq") or [])]
+        if "NOT status:deleted" not in fq:
+            fq.append("NOT status:deleted")
+        scoped_query["fq"] = fq
+        scoped_query.setdefault("sort", "sequence_no asc")
+
+        response = super().search(
+            query=self._apply_viewer_filter(
+                scoped_query,
                 viewer,
                 include_unapproved=include_unapproved,
             )
         )
-        response = ELASTIC_CLIENT.search_entities(
-            index_name=self.collection_name, qspec=qspec
-        )
-        return [
+        response["results"] = [
             self.dump_schema.model_validate(
-                self._strip_search_metadata(obj)
+                self._strip_search_metadata(guideline)
             ).model_dump(mode="json")
-            for obj in response["results"]
+            for guideline in response.get("results", [])
         ]
+        return response
 
     def list(
         self,

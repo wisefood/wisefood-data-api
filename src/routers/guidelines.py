@@ -71,6 +71,27 @@ def api_fetch_guide_guidelines(
     )
 
 
+@router.post(
+    "/by-guide/{guide_urn}/search",
+    summary="Search guidelines for a guide",
+    description=(
+        "Search, paginate, filter, and facet dietary guidelines linked to a specific guide URN."
+    ),
+)
+@render()
+def api_search_guide_guidelines(
+    request: Request,
+    guide_urn: str,
+    q: SearchSchema,
+    viewer: dict = Depends(auth()),
+):
+    return GUIDELINE.search_for_guide(
+        guide_urn=guide_urn,
+        query=q.model_dump(mode="json", exclude_none=True),
+        viewer=viewer,
+    )
+
+
 @router.get(
     "/{id}",
     summary="Get dietary guideline by ID",

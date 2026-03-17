@@ -52,6 +52,7 @@ Guidelines are dependent records stored in a separate collection and linked to a
 
 - rule text
 - order within the guide
+- originating PDF page number
 - action type
 - target populations
 - frequency
@@ -274,7 +275,7 @@ The application exposes the following route groups:
 - `/api/v1/guides`
   Dietary guide CRUD and search
 - `/api/v1/guidelines`
-  Guideline CRUD, search, and fetch-by-guide
+  Guideline CRUD, search, fetch-by-guide, and guide-scoped search with facets
 - `/api/v1/articles`
   Article CRUD, search, and AI enhancement
 - `/api/v1/artifacts`

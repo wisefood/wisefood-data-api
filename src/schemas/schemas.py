@@ -737,6 +737,11 @@ class GuidelineSchema(BaseModel):
         ..., description="Full text of the dietary guideline"
     )
     sequence_no: int = Field(..., ge=1, description="Order of the guideline in the guide")
+    page_no: int | None = Field(
+        None,
+        ge=1,
+        description="Page number in the parent guide PDF where the guideline originates",
+    )
     action_type: GuidelineActionType = Field(
         ..., description="Normalized action category for the guideline"
     )
@@ -806,6 +811,11 @@ class GuidelineCreationSchema(BaseModel):
         ..., description="Full text of the dietary guideline"
     )
     sequence_no: int = Field(..., ge=1, description="Order of the guideline in the guide")
+    page_no: int | None = Field(
+        None,
+        ge=1,
+        description="Page number in the parent guide PDF where the guideline originates",
+    )
     action_type: GuidelineActionType = Field(
         ..., description="Normalized action category for the guideline"
     )
@@ -840,6 +850,7 @@ class GuidelineUpdateSchema(BaseModel):
     title: Optional[NonEmptyStr] = None
     rule_text: Optional[NonEmptyAbstract] = None
     sequence_no: Optional[int] = Field(None, ge=1)
+    page_no: int | None = Field(None, ge=1)
     action_type: GuidelineActionType | None = None
     target_populations: List[GuidelineTargetPopulation] | None = None
     frequency: GuidelineFrequency | None = None

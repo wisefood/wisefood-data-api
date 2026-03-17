@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from datetime import datetime
 from elasticsearch import Elasticsearch, NotFoundError, BadRequestError
@@ -258,8 +259,10 @@ class ElasticsearchClientSingleton:
             result.append((field, order))
 
         return result
-    
-    def get_default_facet_fields(self, index_name: str) -> Dict[str, str]:
+
+    def _get_mapped_facet_fields(
+        self, index_name: str, *, exclude_default_fields: bool
+    ) -> Dict[str, str]:
         mapping = self.client.indices.get_mapping(index=index_name)
         props = mapping[index_name]["mappings"].get("properties", {})
 
@@ -269,9 +272,15 @@ class ElasticsearchClientSingleton:
             for field, spec in properties.items():
                 field_path = f"{prefix}{field}"
 
-                if field_path in DEFAULT_FACET_EXCLUDE_FIELDS or field in DEFAULT_FACET_EXCLUDE_FIELDS:
+                if exclude_default_fields and (
+                    field_path in DEFAULT_FACET_EXCLUDE_FIELDS
+                    or field in DEFAULT_FACET_EXCLUDE_FIELDS
+                ):
                     continue
-                if field_path in NON_FACET_SEMANTIC_FIELDS or field in NON_FACET_SEMANTIC_FIELDS:
+                if exclude_default_fields and (
+                    field_path in NON_FACET_SEMANTIC_FIELDS
+                    or field in NON_FACET_SEMANTIC_FIELDS
+                ):
                     continue
 
                 field_type = spec.get("type")
@@ -308,6 +317,38 @@ class ElasticsearchClientSingleton:
 
         return facet_fields
 
+    def get_default_facet_fields(self, index_name: str) -> Dict[str, str]:
+        return self._get_mapped_facet_fields(
+            index_name, exclude_default_fields=True
+        )
+
+    @staticmethod
+    def extract_query_string_fields(query: str) -> List[str]:
+        return list(
+            {
+                match.group("field")
+                for match in re.finditer(r"(?P<field>[A-Za-z_][\w.]*)\s*:", query)
+            }
+        )
+
+    def resolve_facet_fields(
+        self, index_name: str, fields: List[str] | None
+    ) -> Dict[str, str]:
+        if not fields:
+            return {}
+
+        mapped_fields = self._get_mapped_facet_fields(
+            index_name, exclude_default_fields=False
+        )
+        resolved: Dict[str, str] = {}
+
+        for field in fields:
+            normalized_field = field.removesuffix(".keyword")
+            field_type = mapped_fields.get(normalized_field)
+            if field_type:
+                resolved[normalized_field] = field_type
+
+        return resolved
 
     def search_entities(self, index_name: str, qspec) -> Dict[str, Any]:
         q = qspec.model_dump()
@@ -346,7 +387,7 @@ class ElasticsearchClientSingleton:
         # Facet field selection
         # ----------------------------
         facet_fields_list = q.get("fields") or []
-        facet_fields: Dict[str, str] = {}
+        facet_fields = self.resolve_facet_fields(index_name, facet_fields_list)
 
         # 1) Explicit facet fields
         if facet_fields_list:
@@ -354,15 +395,15 @@ class ElasticsearchClientSingleton:
 
         # 2) Infer from fq filters
         elif q.get("fq"):
-            extracted = set()
+            extracted = []
             for fq in q["fq"]:
-                if ":" in fq:
-                    extracted.add(fq.split(":", 1)[0].strip())
-            facet_fields_list = list(extracted)
+                extracted.extend(self.extract_query_string_fields(fq))
+            facet_fields = self.resolve_facet_fields(index_name, extracted)
 
         # 3) Default mapping-driven facets
         if not facet_fields_list:
-            facet_fields = self.get_default_facet_fields(index_name)
+            if not q.get("fq"):
+                facet_fields = self.get_default_facet_fields(index_name)
 
         # ----------------------------
         # Aggregations
