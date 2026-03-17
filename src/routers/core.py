@@ -41,12 +41,3 @@ def login(request: Request, creds: MTMSchema):
     return kutils.get_client_token(
         client_id=creds.client_id, client_secret=creds.client_secret
     )
-
-
-@router.post(
-    "/s3",
-    dependencies=[Depends(auth())],
-)
-@render()
-def login(request: Request):
-    return MINIO.get_personalized_credentials(kutils.current_token(request))
