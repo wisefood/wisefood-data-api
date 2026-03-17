@@ -146,7 +146,61 @@ class MinioClientSingleton:
         if not cls._initialized:
             cls._initialize()
         return cls._config
-    
+
+    @classmethod 
+    def get_personalized_credentials(cls, token: str) -> dict:
+        if not cls._initialized:
+            cls._initialize()
+        
+        if not token:
+            raise ValueError("Token is required for personalized client")
+        
+        sts_params = {
+            "Action": "AssumeRoleWithWebIdentity",
+            "WebIdentityToken": token,
+            "Version": "2011-06-15",
+            "DurationSeconds": "3600",
+        }
+        
+        try:
+            sts_url = cls._config.ext_url_api or f"{'https' if cls._config.secure else 'http'}://{cls._config.endpoint}"
+            response = requests.post(url=sts_url, params=sts_params, timeout=10)
+                        
+            if response.status_code not in range(200, 300):
+                logger.error(f"STS failed: {response.status_code} - {response.text[:200]}")
+                raise InternalError(f"STS authentication failed with status {response.status_code}")
+            
+            # Parse XML response
+            root = ET.fromstring(response.text)
+            ns = {"sts": "https://sts.amazonaws.com/doc/2011-06-15/"}
+
+            credentials = root.find(".//sts:Credentials", ns)
+            if credentials is None:
+                raise InternalError("No credentials found in STS response")
+
+            access_key = credentials.findtext("sts:AccessKeyId", default=None, namespaces=ns)
+            secret_key = credentials.findtext("sts:SecretAccessKey", default=None, namespaces=ns)
+            session_token = credentials.findtext("sts:SessionToken", default=None, namespaces=ns)
+
+            if not all([access_key, secret_key, session_token]):
+                raise InternalError("Incomplete credentials in STS response")
+
+            return {
+                "access_key": access_key,
+                "secret_key": secret_key,
+                "session_token": session_token,
+            }
+        except ET.ParseError as e:
+            logger.error(f"Failed to parse STS XML response: {e}")
+            raise InternalError(f"STS response parsing failed: {str(e)}")
+        except requests.RequestException as e:
+            logger.error(f"STS request failed: {e}")
+            raise InternalError(f"STS request failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error creating personalized client: {e}")
+            raise InternalError(f"Failed to create personalized client: {str(e)}")
+
+
     @classmethod
     def get_personalized_client(cls, token: str) -> Minio:
         """
@@ -175,34 +229,14 @@ class MinioClientSingleton:
         }
         
         try:
-            sts_url = cls._config.ext_url_api or f"{'https' if cls._config.secure else 'http'}://{cls._config.endpoint}"
-            response = requests.post(url=sts_url, params=sts_params, timeout=10)
-                        
-            if response.status_code not in range(200, 300):
-                logger.error(f"STS failed: {response.status_code} - {response.text[:200]}")
-                raise InternalError(f"STS authentication failed with status {response.status_code}")
-            
-            # Parse XML response
-            root = ET.fromstring(response.text)
-            credentials = root.find(".//{https://sts.amazonaws.com/doc/2011-06-15/}Credentials")
-            
-            if credentials is None:
-                raise InternalError("No credentials found in STS response")
-            
-            # Extract credentials
-            access_key_elem = credentials.find("{https://sts.amazonaws.com/doc/2011-06-15/}AccessKeyId")
-            secret_key_elem = credentials.find("{https://sts.amazonaws.com/doc/2011-06-15/}SecretAccessKey")
-            session_token_elem = credentials.find("{https://sts.amazonaws.com/doc/2011-06-15/}SessionToken")
-            
-            if not all([access_key_elem, secret_key_elem, session_token_elem]):
-                raise InternalError("Incomplete credentials in STS response")
-            
+            creds = cls.get_personalized_credentials(token)
+        
             # Create personalized client
             personalized_client = Minio(
                 endpoint=cls._config.endpoint,
-                access_key=access_key_elem.text,
-                secret_key=secret_key_elem.text,
-                session_token=session_token_elem.text,
+                access_key=creds["access_key"],
+                secret_key=creds["secret_key"],
+                session_token=creds["session_token"],
                 secure=cls._config.secure,
                 region=cls._config.region
             )

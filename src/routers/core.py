@@ -4,6 +4,7 @@ from auth import auth
 from schemas import LoginSchema, MTMSchema
 import kutils
 from exceptions import AuthenticationError
+from backend.minio import MINIO
 
 router = APIRouter(prefix="/api/v1/system", tags=["System Operations"])
 
@@ -40,3 +41,12 @@ def login(request: Request, creds: MTMSchema):
     return kutils.get_client_token(
         client_id=creds.client_id, client_secret=creds.client_secret
     )
+
+
+@router.post(
+    "/s3",
+    dependencies=[Depends(auth())],
+)
+@render()
+def login(request: Request):
+    return MINIO.get_personalized_credentials(kutils.current_token(request))
