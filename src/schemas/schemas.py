@@ -340,7 +340,9 @@ class ArtifactSchema(BaseModel):
     file_s3_url: Optional[str] = Field(
         None, description="S3 URL for internal use (if applicable)"
     )
-    file_type: str
+    file_type: str = Field(
+        ..., description="File extension without the leading dot (e.g., 'pdf')"
+    )
     file_size: int
     language: Union[Iso639_1, None] = Field(
         default=None, description="Language code (ISO 639-1), e.g., 'en'"
@@ -376,7 +378,7 @@ class ArtifactCreationSchema(BaseModel):
     )
     file_url: HttpUrl = Field(..., description="URL to download the artifact")
     file_type: str = Field(
-        ..., description="MIME type of the artifact (e.g., 'application/pdf')"
+        ..., description="File extension without the leading dot (e.g., 'pdf')"
     )
     file_size: int = Field(..., ge=0, description="Size of the artifact in bytes")
 
@@ -393,7 +395,7 @@ class ArtifactUpdateSchema(BaseModel):
         use_enum_values=True,
     )
     file_type: str = Field(
-        ..., description="MIME type of the artifact (e.g., 'application/pdf')"
+        ..., description="File extension without the leading dot (e.g., 'pdf')"
     )
     title: NonEmptyStr | None = None
     description: NonEmptyStr | None = None

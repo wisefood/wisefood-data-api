@@ -1,11 +1,12 @@
 
 from datetime import timedelta
+import mimetypes
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from backend.redis import REDIS
 from backend.elastic import ELASTIC_CLIENT
 from catalog_access import can_view_unapproved_catalog, is_approved_or_active
-from backend.minio import MINIO_CLIENT
+from backend.minio import MINIO_CLIENT, MINIO_PUBLIC_CLIENT
 from pathlib import Path
 from minio.error import S3Error
 from io import BytesIO
@@ -124,9 +125,11 @@ class Artifact(Entity):
         )
 
         return [
-            self.dump_schema.model_validate(
-                self._strip_search_metadata(obj)
-            ).model_dump(mode="json")
+            self._normalize_artifact_document(
+                self.dump_schema.model_validate(
+                    self._strip_search_metadata(obj)
+                ).model_dump(mode="json")
+            )
             for obj in response["results"]
         ]
 
@@ -157,7 +160,7 @@ class Artifact(Entity):
             viewer,
             include_unapproved=include_unapproved,
         )
-        return entity
+        return self._normalize_artifact_document(entity)
 
     @staticmethod
     def _parse_s3_url(s3_url: str | None, artifact_id: str) -> tuple[str, str]:
@@ -175,12 +178,113 @@ class Artifact(Entity):
 
         return bucket_name, object_name
 
+    @staticmethod
+    def _extension_from_name(name: str | None) -> str | None:
+        if not name:
+            return None
+        suffix = Path(name).suffix.lower().strip()
+        if not suffix:
+            return None
+        return suffix.lstrip(".")
+
+    def _normalize_file_type(
+        self,
+        file_type: str | None,
+        *,
+        filename: str | None = None,
+        strict: bool = False,
+    ) -> str | None:
+        extension = self._extension_from_name(filename)
+        if extension:
+            return extension
+
+        if file_type is None:
+            if strict:
+                raise DataError("Artifact file_type is required.")
+            return None
+
+        value = file_type.strip().lower()
+        if not value:
+            if strict:
+                raise DataError("Artifact file_type cannot be empty.")
+            return None
+
+        if "/" in value:
+            guessed = mimetypes.guess_extension(value, strict=False)
+            if guessed:
+                return guessed.lstrip(".").lower()
+            if strict:
+                raise DataError(
+                    f"Artifact file_type '{file_type}' could not be normalized to a file extension."
+                )
+            return value
+
+        return value.lstrip(".")
+
+    def _normalize_artifact_document(self, artifact: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(artifact)
+        object_name = None
+        try:
+            _, object_name = self._parse_s3_url(
+                normalized.get("file_s3_url"), str(normalized.get("id", "artifact"))
+            )
+        except DataError:
+            object_name = None
+
+        normalized_file_type = self._normalize_file_type(
+            normalized.get("file_type"),
+            filename=object_name,
+        )
+        if normalized_file_type:
+            normalized["file_type"] = normalized_file_type
+
+        return normalized
+
+    @staticmethod
+    def _artifact_download_name(
+        artifact: Dict[str, Any],
+        object_name: str,
+    ) -> str:
+        title = artifact.get("title")
+        if title and Path(title).suffix:
+            return title
+        return artifact.get("filename", object_name.split("/")[-1])
+
+    @staticmethod
+    def _guess_download_content_type(
+        filename: str,
+        file_type: str | None,
+    ) -> str:
+        raw_type = (file_type or "").strip().lower()
+        if "/" in raw_type:
+            return raw_type
+
+        guessed_from_name, _ = mimetypes.guess_type(filename, strict=False)
+        if guessed_from_name:
+            return guessed_from_name
+
+        if raw_type:
+            guessed_from_extension, _ = mimetypes.guess_type(
+                f"file.{raw_type}", strict=False
+            )
+            if guessed_from_extension:
+                return guessed_from_extension
+
+        return "application/octet-stream"
+
     def _get_storage_client(self):
         try:
             return MINIO_CLIENT()
         except Exception as e:
             logger.error(f"Failed to get MinIO client: {e}")
             raise InternalError(f"Failed to initialize storage client: {e}")
+
+    def _get_public_storage_client(self):
+        try:
+            return MINIO_PUBLIC_CLIENT()
+        except Exception as e:
+            logger.error(f"Failed to get public MinIO client: {e}")
+            raise InternalError(f"Failed to initialize public storage client: {e}")
 
     def _get_presign_expiry_seconds(self) -> int:
         expires_in = int(self.PRESIGNED_URL_EXPIRY_SECONDS)
@@ -217,6 +321,10 @@ class Artifact(Entity):
         self.invalidate_cache(artifact_data.parent_urn if not override else spec["parent_urn"])
 
         artifact_data = artifact_data.model_dump(mode="json") if not override else artifact_data
+        artifact_data["file_type"] = self._normalize_file_type(
+            artifact_data.get("file_type"),
+            strict=True,
+        )
         artifact_data["creator"] = creator["preferred_username"]
         artifact_data = self.upsert_system_fields(artifact_data, update=False)
         try:
@@ -263,8 +371,11 @@ class Artifact(Entity):
             response = minio_client.get_object(bucket_name, object_name)
             # Don't read() or close() - return the response object directly
             
-            filename = artifact.get("filename", object_name.split("/")[-1])
-            content_type = artifact.get("file_type", "application/octet-stream")
+            filename = self._artifact_download_name(artifact, object_name)
+            content_type = self._guess_download_content_type(
+                filename,
+                artifact.get("file_type"),
+            )
             
             return response, filename, content_type
             
@@ -299,7 +410,7 @@ class Artifact(Entity):
             raise DataError(f"Failed to parse S3 URL for artifact {id}: {e}")
 
         expires_in = self._get_presign_expiry_seconds()
-        minio_client = self._get_storage_client()
+        minio_client = self._get_public_storage_client()
 
         try:
             url = minio_client.presigned_get_object(
@@ -367,6 +478,10 @@ class Artifact(Entity):
         
         # Determine content type
         content_type = file.content_type or "application/octet-stream"
+        file_type = self._normalize_file_type(
+            content_type,
+            filename=file.filename,
+        ) or "bin"
         
         # Use ROOT client for uploads (has write permissions)
         # Personalized client would be for user-specific file access
@@ -407,7 +522,7 @@ class Artifact(Entity):
             "language": language,
             "file_url": file_url,
             "file_s3_url": file_s3_url,
-            "file_type": content_type,
+            "file_type": file_type,
             "file_size": file_size,
         }
         

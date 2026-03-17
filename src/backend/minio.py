@@ -7,6 +7,7 @@ from minio.error import S3Error
 import requests
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from main import config
 from exceptions import InternalError
 
@@ -67,8 +68,10 @@ class MinioClientSingleton:
     _lock = threading.Lock()
     _initialized = False
     _client: Optional[Minio] = None
+    _public_client: Optional[Minio] = None
     _admin: Optional[MinioAdmin] = None
     _config: Optional[MinioConfig] = None
+    _http_client: Optional[urllib3.PoolManager] = None
     
     @classmethod
     def _initialize(cls) -> None:
@@ -94,6 +97,7 @@ class MinioClientSingleton:
                     retries=urllib3.Retry(total=3),
                     timeout=timeout,
                 )
+                cls._http_client = pool
                 
                 # Create main client with region to avoid signature issues
                 cls._client = Minio(
@@ -132,6 +136,42 @@ class MinioClientSingleton:
         if not cls._initialized:
             cls._initialize()
         return cls._client
+
+    @classmethod
+    def get_public_client(cls) -> Minio:
+        """Get a MinIO client configured with the externally reachable endpoint."""
+        if not cls._initialized:
+            cls._initialize()
+
+        if not cls._config.ext_url_api:
+            return cls._client
+
+        with cls._lock:
+            if cls._public_client is not None:
+                return cls._public_client
+
+            parsed = urlparse(cls._config.ext_url_api)
+            endpoint = (parsed.netloc or parsed.path or "").rstrip("/")
+            if not endpoint:
+                raise InternalError("MINIO_EXT_URL_API is invalid.")
+
+            secure = parsed.scheme != "http"
+
+            cls._public_client = Minio(
+                endpoint=endpoint,
+                access_key=cls._config.access_key,
+                secret_key=cls._config.secret_key,
+                secure=secure,
+                http_client=cls._http_client,
+                region=cls._config.region,
+            )
+
+            try:
+                cls._public_client._region_map[cls._config.bucket] = cls._config.region
+            except Exception as e:
+                logger.warning(f"Could not pre-cache region for public client: {e}")
+
+            return cls._public_client
     
     @classmethod
     def get_admin(cls) -> MinioAdmin:
@@ -297,12 +337,15 @@ class MinioClientSingleton:
         with cls._lock:
             cls._initialized = False
             cls._client = None
+            cls._public_client = None
             cls._admin = None
             cls._config = None
+            cls._http_client = None
 
 
 # Global instances - lazy initialized on first access
 MINIO_CLIENT = MinioClientSingleton.get_client
+MINIO_PUBLIC_CLIENT = MinioClientSingleton.get_public_client
 MINIO_ADMIN = MinioClientSingleton.get_admin
 MINIO_CONFIG = MinioClientSingleton.get_config
 MINIO = MinioClientSingleton
