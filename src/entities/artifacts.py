@@ -82,9 +82,13 @@ class Artifact(Entity):
         response = ELASTIC_CLIENT.search_entities(
             index_name=self.collection_name, qspec=qspec
         )
-        
-        # Return just the results list, not the whole dict
-        return response["results"]
+
+        return [
+            self.dump_schema.model_validate(
+                self._strip_search_metadata(obj)
+            ).model_dump(mode="json")
+            for obj in response["results"]
+        ]
 
     def search(self, query: Dict[str, Any]):
         """
