@@ -11,6 +11,11 @@ from typing import Dict, Any, List, Optional
 import logging
 
 from backend.elastic import ELASTIC_CLIENT
+from catalog_access import (
+    apply_catalog_visibility_filter,
+    can_view_unapproved_catalog,
+    is_approved_or_active,
+)
 from entity import DependentEntity
 from entities.artifacts import ARTIFACT
 from exceptions import ConflictError, DataError, InternalError, NotFoundError
@@ -104,10 +109,55 @@ class Guideline(DependentEntity):
                 "Unpublish the guide first."
             )
 
-    def get(self, id_: str) -> Dict[str, Any]:
+    @staticmethod
+    def _viewer_can_access_all(
+        viewer: Dict[str, Any] | None, *, include_unapproved: bool = False
+    ) -> bool:
+        """Allow unrestricted reads only for privileged viewers or explicit internal bypasses."""
+        return include_unapproved or can_view_unapproved_catalog(viewer)
+
+    def _ensure_visible_to_viewer(
+        self,
+        guideline_dict: Dict[str, Any],
+        viewer: Dict[str, Any] | None,
+        *,
+        include_unapproved: bool = False,
+    ) -> None:
+        """Raise not found when a caller requests a hidden guideline directly."""
+        if self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ) or is_approved_or_active(guideline_dict):
+            return
+        raise NotFoundError(f"Guideline with ID {guideline_dict['id']} not found.")
+
+    def _apply_viewer_filter(
+        self,
+        query: Dict[str, Any],
+        viewer: Dict[str, Any] | None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """Constrain guideline search-style queries for non-privileged viewers."""
+        if self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ):
+            return query
+        return apply_catalog_visibility_filter(query, exclude_deleted=True)
+
+    def get(
+        self,
+        id_: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """Fetch a single guideline and enforce read visibility before returning it."""
         entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=id_)
         if entity is None:
             raise NotFoundError(f"Guideline with ID {id_} not found.")
+        self._ensure_visible_to_viewer(
+            entity, viewer, include_unapproved=include_unapproved
+        )
         return entity
 
     def _get_guide(self, guide_urn: str) -> Dict[str, Any]:
@@ -147,7 +197,7 @@ class Guideline(DependentEntity):
         if not source_refs:
             return []
 
-        artifacts = ARTIFACT.fetch(parent_urn=guide_urn)
+        artifacts = ARTIFACT.fetch(parent_urn=guide_urn, include_unapproved=True)
         if not artifacts:
             raise DataError(
                 "source_refs require at least one artifact attached to the parent guide."
@@ -215,11 +265,15 @@ class Guideline(DependentEntity):
         self.invalidate_cache(guideline_dict["guide_urn"])
         return guideline_dict["id"]
 
+    def create_entity(self, spec, creator) -> Dict[str, Any]:
+        identifier = self.create(spec, creator)
+        return self.get(identifier, viewer=creator, include_unapproved=True)
+
     def patch_entity_with_actor(self, id_: str, spec: Dict[str, Any], actor: dict):
         identifier = self.get_identifier(id_)
         self.invalidate_cache(identifier)
         self.patch(identifier, spec, actor=actor)
-        return self.get_entity(identifier)
+        return self.get(identifier, viewer=actor, include_unapproved=True)
 
     def patch(self, id_: str, spec, actor: dict | None = None) -> None:
         try:
@@ -227,7 +281,7 @@ class Guideline(DependentEntity):
         except Exception as e:
             raise DataError(f"Invalid data for updating guideline: {e}")
 
-        current = self.get_entity(id_)
+        current = self.get(id_, viewer=actor, include_unapproved=True)
         update_dict = guideline_data.model_dump(
             mode="json", exclude_unset=True, exclude_none=True
         )
@@ -273,7 +327,7 @@ class Guideline(DependentEntity):
         self.invalidate_cache(current["guide_urn"])
 
     def delete(self, id_: str) -> bool:
-        current = self.get_entity(id_)
+        current = self.get(id_, include_unapproved=True)
         try:
             ELASTIC_CLIENT.delete_entity(index_name=self.collection_name, urn=id_)
         except Exception as e:
@@ -283,17 +337,32 @@ class Guideline(DependentEntity):
         return {"deleted": id_}
 
     def fetch_for_guide(
-        self, guide_urn: str, limit: int = 1000, offset: int = 0
+        self,
+        guide_urn: str,
+        limit: int = 1000,
+        offset: int = 0,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
     ) -> List[Dict[str, Any]]:
-        self._get_guide(guide_urn)
+        """Fetch visible guidelines for a guide, hiding the whole set if the guide is hidden."""
+        guide = self._get_guide(guide_urn)
+        if not self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ) and not is_approved_or_active(guide):
+            raise NotFoundError(f"Guide with URN {guide_urn} not found.")
 
         qspec = SearchSchema.model_validate(
-            {
-                "limit": limit,
-                "offset": offset,
-                "fq": [f'guide_urn:"{guide_urn}"', "NOT status:deleted"],
-                "sort": "sequence_no asc",
-            }
+            self._apply_viewer_filter(
+                {
+                    "limit": limit,
+                    "offset": offset,
+                    "fq": [f'guide_urn:"{guide_urn}"', "NOT status:deleted"],
+                    "sort": "sequence_no asc",
+                },
+                viewer,
+                include_unapproved=include_unapproved,
+            )
         )
         response = ELASTIC_CLIENT.search_entities(
             index_name=self.collection_name, qspec=qspec
@@ -305,15 +374,112 @@ class Guideline(DependentEntity):
             for obj in response["results"]
         ]
 
-    def list_ids_for_guide(self, guide_urn: str) -> List[str]:
-        return [item["id"] for item in self.fetch_for_guide(guide_urn=guide_urn)]
+    def list(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> List[str]:
+        """List visible guideline UUIDs for the current viewer."""
+        if self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ):
+            return super().list(limit=limit, offset=offset)
+
+        response = super().search(
+            query=self._apply_viewer_filter(
+                {
+                    "limit": limit or 100,
+                    "offset": offset or 0,
+                    "fl": ["id"],
+                },
+                viewer,
+                include_unapproved=include_unapproved,
+            )
+        )
+        return [
+            self._strip_search_metadata(guideline)["id"]
+            for guideline in response.get("results", [])
+            if "id" in self._strip_search_metadata(guideline)
+        ]
+
+    def fetch(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Fetch guidelines while enforcing public visibility for non-privileged viewers."""
+        if self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ):
+            return super().fetch(limit=limit, offset=offset)
+
+        response = super().search(
+            query=self._apply_viewer_filter(
+                {"limit": limit or 100, "offset": offset or 0},
+                viewer,
+                include_unapproved=include_unapproved,
+            )
+        )
+        return [
+            self.dump_schema.model_validate(
+                self._strip_search_metadata(guideline)
+            ).model_dump(mode="json")
+            for guideline in response.get("results", [])
+        ]
+
+    def search(
+        self,
+        query: Dict[str, Any],
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ):
+        """Search guidelines and return only the rows visible to the caller."""
+        response = super().search(
+            query=self._apply_viewer_filter(
+                query, viewer, include_unapproved=include_unapproved
+            )
+        )
+        response["results"] = [
+            self.dump_schema.model_validate(
+                self._strip_search_metadata(guideline)
+            ).model_dump(mode="json")
+            for guideline in response.get("results", [])
+        ]
+        return response
+
+    def list_ids_for_guide(
+        self,
+        guide_urn: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> List[str]:
+        """Return visible guideline IDs for guide hydration and related UI flows."""
+        return [
+            item["id"]
+            for item in self.fetch_for_guide(
+                guide_urn=guide_urn,
+                viewer=viewer,
+                include_unapproved=include_unapproved,
+            )
+        ]
 
     def has_guidelines_for_guide(self, guide_urn: str) -> bool:
-        return bool(self.list_ids_for_guide(guide_urn))
+        """Check for linked guidelines without applying public visibility restrictions."""
+        return bool(self.list_ids_for_guide(guide_urn, include_unapproved=True))
 
     def sync_parent_metadata(self, guide_urn: str) -> None:
         guide = self._get_guide(guide_urn)
-        for guideline in self.fetch_for_guide(guide_urn=guide_urn):
+        for guideline in self.fetch_for_guide(
+            guide_urn=guide_urn, include_unapproved=True
+        ):
             update_dict = self.upsert_system_fields(
                 {"id": guideline["id"], "guide_region": guide.get("region")},
                 update=True,
@@ -325,7 +491,9 @@ class Guideline(DependentEntity):
     def sync_publication_state(self, guide_urn: str, *, guide_status: str, guide_visibility: str) -> None:
         guide_is_published = guide_status == "active" and guide_visibility == "public"
 
-        for guideline in self.fetch_for_guide(guide_urn=guide_urn):
+        for guideline in self.fetch_for_guide(
+            guide_urn=guide_urn, include_unapproved=True
+        ):
             if guideline.get("status") != "active":
                 continue
 

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from backend.redis import REDIS
 from backend.elastic import ELASTIC_CLIENT
+from catalog_access import can_view_unapproved_catalog, is_approved_or_active
 from backend.minio import MINIO_CLIENT
 from pathlib import Path
 from minio.error import S3Error
@@ -60,13 +61,48 @@ class Artifact(Entity):
     ) -> List[str]:
         raise NotImplementedError("The Artifact entity does not support listing.")
 
+    @staticmethod
+    def _viewer_can_access_all(
+        viewer: Dict[str, Any] | None, *, include_unapproved: bool = False
+    ) -> bool:
+        """Allow unrestricted artifact reads only for privileged viewers or explicit bypasses."""
+        return include_unapproved or can_view_unapproved_catalog(viewer)
+
+    def _ensure_parent_visible(
+        self,
+        parent_urn: str,
+        viewer: Dict[str, Any] | None,
+        *,
+        include_unapproved: bool = False,
+    ) -> None:
+        """Hide guide artifacts from non-privileged viewers when the parent guide is hidden."""
+        if self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ):
+            return
+        if not parent_urn.startswith("urn:guide:"):
+            return
+
+        guide = ELASTIC_CLIENT.get_entity(index_name="guides", urn=parent_urn)
+        if guide is None or not is_approved_or_active(guide):
+            raise NotFoundError("Artifact not found.")
+
     def fetch(
-        self, parent_urn: str,
+        self,
+        parent_urn: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
     ) -> List[Dict[str, Any]]:
+        """Fetch artifacts for a parent entity after enforcing parent-based visibility."""
         try:
             Entity.validate_existence(parent_urn)
         except NotFoundError:
             raise NotFoundError(f"Parent entity {parent_urn} not found.")
+
+        self._ensure_parent_visible(
+            parent_urn, viewer, include_unapproved=include_unapproved
+        )
 
         query = {
             "limit": 1000,
@@ -101,10 +137,22 @@ class Artifact(Entity):
         )
 
 
-    def get(self, urn: str) -> Dict[str, Any]:
+    def get(
+        self,
+        urn: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """Fetch a single artifact and ensure its parent is visible to the caller."""
         entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=urn)
         if entity is None:
             raise NotFoundError(f"Artifact with ID {urn} not found.")
+        self._ensure_parent_visible(
+            entity.get("parent_urn", ""),
+            viewer,
+            include_unapproved=include_unapproved,
+        )
         return entity
 
     def create_entity(self, spec, creator) -> Dict[str, Any]:
@@ -117,7 +165,7 @@ class Artifact(Entity):
         :return: The created entity.
         """
         id = self.create(spec, creator)
-        return self.get_entity(id)
+        return self.get(id, viewer=creator, include_unapproved=True)
 
     def create(self, spec: BaseModel, creator: dict, override: bool = False) -> str:
         # Validate input data
@@ -145,14 +193,24 @@ class Artifact(Entity):
 
         return artifact_data["id"]
     
-    def download(self, id: str):
+    def download(
+        self,
+        id: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ):
         """
         Download the file associated with the artifact.
 
         :param id: The ID of the artifact.
         :return: Tuple of (file_content, filename, content_type)
         """
-        artifact = self.get_entity(id)
+        artifact = self.get(
+            id,
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
         if artifact is None:
             raise NotFoundError(f"Artifact with ID {id} not found.")
 
@@ -287,7 +345,9 @@ class Artifact(Entity):
         # Create artifact entry
         try:
             artifact_id = self.create(artifact_spec, creator, override=True)
-            return self.get_entity(artifact_id)
+            return self.get(
+                artifact_id, viewer=creator, include_unapproved=True
+            )
         except Exception as e:
             # Cleanup orphaned file
             try:

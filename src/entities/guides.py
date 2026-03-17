@@ -11,7 +11,13 @@ the underlying infrastructure provided by the Entity base class.
 """
 
 from typing import Optional, List, Dict, Any
+
 from backend.elastic import ELASTIC_CLIENT
+from catalog_access import (
+    apply_catalog_visibility_filter,
+    can_view_unapproved_catalog,
+    is_approved_or_active,
+)
 from exceptions import (
     DataError,
     InternalError,
@@ -37,11 +43,7 @@ logger = logging.getLogger(__name__)
 class Guide(Entity):
     def __init__(self):
         super().__init__(
-            "guide", 
-            "guides", 
-            GuideSchema, 
-            GuideCreationSchema, 
-            GuideUpdateSchema
+            "guide", "guides", GuideSchema, GuideCreationSchema, GuideUpdateSchema
         )
 
     @staticmethod
@@ -88,41 +90,188 @@ class Guide(Entity):
                 "Guide must have a verifier user ID before it can be published as active."
             )
 
-        if ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=guide_dict["urn"]) is None:
+        if (
+            ELASTIC_CLIENT.get_entity(
+                index_name=self.collection_name, urn=guide_dict["urn"]
+            )
+            is None
+        ):
             return
 
-        for guideline in GUIDELINE.fetch_for_guide(guide_dict["urn"]):
-            if guideline.get("review_status") != "verified" or not guideline.get("verifier_user_id"):
+        for guideline in GUIDELINE.fetch_for_guide(
+            guide_dict["urn"], include_unapproved=True
+        ):
+            if guideline.get("review_status") != "verified" or not guideline.get(
+                "verifier_user_id"
+            ):
                 raise ConflictError(
                     "Guide cannot be active while it has unverified guidelines."
                 )
 
-    def _hydrate_guide(self, entity: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _viewer_can_access_all(
+        viewer: Dict[str, Any] | None, *, include_unapproved: bool = False
+    ) -> bool:
+        """Allow unrestricted reads only for privileged viewers or explicit internal bypasses."""
+        return include_unapproved or can_view_unapproved_catalog(viewer)
+
+    def _ensure_visible_to_viewer(
+        self,
+        guide_dict: Dict[str, Any],
+        viewer: Dict[str, Any] | None,
+        *,
+        include_unapproved: bool = False,
+    ) -> None:
+        """Raise not found when a caller tries to read a hidden guide directly."""
+        if self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ) or is_approved_or_active(guide_dict):
+            return
+        raise NotFoundError(f"Guide with URN {guide_dict['urn']} not found.")
+
+    def _apply_viewer_filter(
+        self,
+        query: Dict[str, Any],
+        viewer: Dict[str, Any] | None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """Constrain list/fetch/search queries to public guides for non-privileged viewers."""
+        if self._viewer_can_access_all(viewer, include_unapproved=include_unapproved):
+            return query
+        return apply_catalog_visibility_filter(query, exclude_deleted=True)
+
+    def _hydrate_guide(
+        self,
+        entity: Dict[str, Any],
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """Attach linked artifacts and guideline IDs using the same viewer visibility rules."""
         hydrated = dict(entity)
         if "urn" not in hydrated:
             return hydrated
-        hydrated["artifacts"] = ARTIFACT.fetch(parent_urn=hydrated["urn"])
-        hydrated["guidelines"] = GUIDELINE.list_ids_for_guide(hydrated["urn"])
+        hydrated["artifacts"] = ARTIFACT.fetch(
+            parent_urn=hydrated["urn"],
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
+        hydrated["guidelines"] = GUIDELINE.list_ids_for_guide(
+            hydrated["urn"],
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
         return hydrated
 
-    def get(self, urn: str) -> Dict[str, Any]:
+    def get(
+        self,
+        urn: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """Fetch a single guide and enforce read visibility before returning it."""
         entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=urn)
         if entity is None:
             raise NotFoundError(f"Guide with URN {urn} not found.")
-        return self._hydrate_guide(entity)
+        self._ensure_visible_to_viewer(
+            entity, viewer, include_unapproved=include_unapproved
+        )
+        return self._hydrate_guide(
+            entity, viewer=viewer, include_unapproved=include_unapproved
+        )
 
     def fetch(
-        self, limit: Optional[int] = None, offset: Optional[int] = None
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
     ) -> List[Dict[str, Any]]:
-        guides = super().fetch(limit=limit, offset=offset)
-        return [self._hydrate_guide(guide) for guide in guides]
+        """Fetch guides while applying viewer-specific visibility rules at query time."""
+        if self._viewer_can_access_all(viewer, include_unapproved=include_unapproved):
+            guides = super().fetch(limit=limit, offset=offset)
+            return [
+                self._hydrate_guide(
+                    guide, viewer=viewer, include_unapproved=include_unapproved
+                )
+                for guide in guides
+            ]
 
-    def search(self, query: Dict[str, Any]):
-        response = super().search(query=query)
+        response = super().search(
+            query=self._apply_viewer_filter(
+                {"limit": limit or 100, "offset": offset or 0},
+                viewer,
+                include_unapproved=include_unapproved,
+            )
+        )
+        return [
+            self._hydrate_guide(
+                self._strip_search_metadata(guide),
+                viewer=viewer,
+                include_unapproved=include_unapproved,
+            )
+            for guide in response.get("results", [])
+        ]
+
+    def list(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> List[str]:
+        """List visible guide URNs for the current viewer."""
+        if self._viewer_can_access_all(viewer, include_unapproved=include_unapproved):
+            return super().list(limit=limit, offset=offset)
+
+        response = super().search(
+            query=self._apply_viewer_filter(
+                {
+                    "limit": limit or 100,
+                    "offset": offset or 0,
+                    "fl": ["urn"],
+                },
+                viewer,
+                include_unapproved=include_unapproved,
+            )
+        )
+        return [
+            self._strip_search_metadata(guide)["urn"]
+            for guide in response.get("results", [])
+            if "urn" in self._strip_search_metadata(guide)
+        ]
+
+    def search(
+        self,
+        query: Dict[str, Any],
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ):
+        """Search guides and hydrate only the rows visible to the caller."""
+        response = super().search(
+            query=self._apply_viewer_filter(
+                query, viewer, include_unapproved=include_unapproved
+            )
+        )
         response["results"] = [
-            self._hydrate_guide(guide) for guide in response.get("results", [])
+            self._hydrate_guide(
+                self._strip_search_metadata(guide),
+                viewer=viewer,
+                include_unapproved=include_unapproved,
+            )
+            for guide in response.get("results", [])
         ]
         return response
+
+    def create_entity(self, spec, creator) -> Dict[str, Any]:
+        self.create(spec, creator)
+        identifier = self.get_identifier(spec.get("urn", spec.get("id")))
+        return self.get(identifier, viewer=creator, include_unapproved=True)
 
     def create(self, spec: GuideCreationSchema, creator: dict) -> Dict[str, Any]:
         # Validate input data
@@ -160,7 +309,7 @@ class Guide(Entity):
         identifier = self.get_identifier(urn)
         self.invalidate_cache(identifier)
         self.patch(identifier, spec, actor=actor)
-        return self.get_entity(identifier)
+        return self.get(identifier, viewer=actor, include_unapproved=True)
 
     def patch(self, urn: str, spec: GuideUpdateSchema, actor: dict | None = None):
         """Partially update an existing guide."""
@@ -169,7 +318,7 @@ class Guide(Entity):
         except Exception as e:
             raise DataError(f"Invalid data for updating guide: {e}")
 
-        current = self.get_entity(urn)
+        current = self.get(urn, viewer=actor, include_unapproved=True)
 
         # Convert to dict and update in Elasticsearch
         update_dict = guide_data.model_dump(
