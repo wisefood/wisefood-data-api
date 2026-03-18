@@ -172,14 +172,33 @@ class Guide(Entity):
         include_unapproved: bool = False,
     ) -> Dict[str, Any]:
         """Fetch a single guide and enforce read visibility before returning it."""
-        entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=urn)
+        identifier = self.get_identifier(urn)
+        entity = ELASTIC_CLIENT.get_entity(
+            index_name=self.collection_name, urn=identifier
+        )
         if entity is None:
-            raise NotFoundError(f"Guide with URN {urn} not found.")
+            raise NotFoundError(f"Guide with URN {identifier} not found.")
         self._ensure_visible_to_viewer(
             entity, viewer, include_unapproved=include_unapproved
         )
         return self._hydrate_guide(
             entity, viewer=viewer, include_unapproved=include_unapproved
+        )
+
+    def get_entity(
+        self,
+        urn: str,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Resolve guide identifiers through the entity helper entrypoint while avoiding
+        the generic cache, because guide visibility and hydration are viewer-specific.
+        """
+        identifier = self.get_identifier(urn)
+        return self.get(
+            identifier, viewer=viewer, include_unapproved=include_unapproved
         )
 
     def fetch(
@@ -245,6 +264,21 @@ class Guide(Entity):
             if "urn" in self._strip_search_metadata(guide)
         ]
 
+    def list_entities(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> List[str]:
+        return self.list(
+            limit=limit,
+            offset=offset,
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
+
     def search(
         self,
         query: Dict[str, Any],
@@ -268,10 +302,38 @@ class Guide(Entity):
         ]
         return response
 
+    def fetch_entities(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ) -> List[Dict[str, Any]]:
+        return self.fetch(
+            limit=limit,
+            offset=offset,
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
+
+    def search_entities(
+        self,
+        query: Dict[str, Any],
+        viewer: Dict[str, Any] | None = None,
+        *,
+        include_unapproved: bool = False,
+    ):
+        return self.search(
+            query=query,
+            viewer=viewer,
+            include_unapproved=include_unapproved,
+        )
+
     def create_entity(self, spec, creator) -> Dict[str, Any]:
         self.create(spec, creator)
         identifier = self.get_identifier(spec.get("urn", spec.get("id")))
-        return self.get(identifier, viewer=creator, include_unapproved=True)
+        return self.get_entity(identifier, viewer=creator, include_unapproved=True)
 
     def create(self, spec: GuideCreationSchema, creator: dict) -> Dict[str, Any]:
         # Validate input data
@@ -305,11 +367,13 @@ class Guide(Entity):
         except Exception as e:
             raise InternalError(f"Failed to create guide: {e}")
 
-    def patch_entity_with_actor(self, urn: str, spec: Dict[str, Any], actor: dict):
+    def patch_entity(
+        self, urn: str, spec: Dict[str, Any], actor: dict | None = None
+    ):
         identifier = self.get_identifier(urn)
         self.invalidate_cache(identifier)
         self.patch(identifier, spec, actor=actor)
-        return self.get(identifier, viewer=actor, include_unapproved=True)
+        return self.get_entity(identifier, viewer=actor, include_unapproved=True)
 
     def patch(self, urn: str, spec: GuideUpdateSchema, actor: dict | None = None):
         """Partially update an existing guide."""

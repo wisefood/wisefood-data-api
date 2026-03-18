@@ -20,7 +20,7 @@ def api_list_guides(
     offset: int = 0,
     viewer: dict = Depends(auth()),
 ):
-    return GUIDE.list(limit=limit, offset=offset, viewer=viewer)
+    return GUIDE.list_entities(limit=limit, offset=offset, viewer=viewer)
 
 
 @router.get(
@@ -35,7 +35,7 @@ def api_fetch_guides(
     offset: int = 0,
     viewer: dict = Depends(auth()),
 ):
-    return GUIDE.fetch(limit=limit, offset=offset, viewer=viewer)
+    return GUIDE.fetch_entities(limit=limit, offset=offset, viewer=viewer)
 
 
 @router.post(
@@ -47,7 +47,7 @@ def api_fetch_guides(
 def api_search_guides(
     request: Request, q: SearchSchema, viewer: dict = Depends(auth())
 ):
-    return GUIDE.search(
+    return GUIDE.search_entities(
         query=q.model_dump(mode="json", exclude_none=True), viewer=viewer
     )
 
@@ -59,7 +59,7 @@ def api_search_guides(
 )
 @render()
 def api_get_guide(request: Request, urn: str, viewer: dict = Depends(auth())):
-    return GUIDE.get(urn, viewer=viewer)
+    return GUIDE.get_entity(urn, viewer=viewer)
 
 
 @router.post(
@@ -83,7 +83,7 @@ def api_create_guide(request: Request, g: GuideCreationSchema):
 )
 @render()
 def api_patch_guide(request: Request, urn: str, g: GuideUpdateSchema):
-    return GUIDE.patch_entity_with_actor(
+    return GUIDE.patch_entity(
         urn,
         g.model_dump(mode="json", exclude_unset=True),
         actor=kutils.current_user(request),
