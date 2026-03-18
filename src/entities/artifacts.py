@@ -544,8 +544,49 @@ class Artifact(Entity):
     def patch(self, urn, spec):
         raise NotImplementedError("The Artifact entity does not support updating.")
 
+    def _delete_bound_storage_object(self, artifact: Dict[str, Any]) -> None:
+        artifact_id = str(artifact.get("id", "artifact"))
+        file_s3_url = artifact.get("file_s3_url")
+
+        if not file_s3_url:
+            return
+
+        try:
+            bucket_name, object_name = self._parse_s3_url(file_s3_url, artifact_id)
+        except DataError as e:
+            logger.warning(
+                "Skipping storage deletion for artifact %s: %s",
+                artifact_id,
+                e,
+            )
+            return
+
+        minio_client = self._get_storage_client()
+        try:
+            minio_client.remove_object(bucket_name, object_name)
+        except S3Error as e:
+            logger.error(
+                "Failed to delete storage object for artifact %s: %s",
+                artifact_id,
+                e,
+            )
+            raise InternalError(f"Failed to delete file from storage: {e}")
+
     def delete(self, urn: str) -> bool:
-        raise NotImplementedError("The Artifact entity does not support deleting.")
+        artifact = self.get(urn, include_unapproved=True)
+        parent_urn = artifact.get("parent_urn")
+
+        self._delete_bound_storage_object(artifact)
+
+        try:
+            ELASTIC_CLIENT.delete_entity(index_name=self.collection_name, urn=urn)
+        except Exception as e:
+            raise InternalError(f"Failed to delete artifact: {e}")
+
+        if parent_urn:
+            self.invalidate_cache(parent_urn)
+
+        return {"deleted": urn}
 
 
 ARTIFACT = Artifact()

@@ -129,4 +129,4 @@ def api_patch_artifact(request: Request, id: str, a: ArtifactUpdateSchema):
 )
 @render()
 def api_delete_artifact(request: Request, id: str):
-    return
+    return ARTIFACT.delete_entity(id)

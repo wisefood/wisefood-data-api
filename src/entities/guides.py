@@ -109,6 +109,19 @@ class Guide(Entity):
                 )
 
     @staticmethod
+    def _is_published(guide_dict: Dict[str, Any]) -> bool:
+        return (
+            guide_dict.get("status") == "active"
+            and guide_dict.get("visibility") == "public"
+        )
+
+    def _ensure_not_published_for_mutation(self, guide_dict: Dict[str, Any]) -> None:
+        if self._is_published(guide_dict):
+            raise ConflictError(
+                "Published guides cannot be modified. Unpublish the guide first."
+            )
+
+    @staticmethod
     def _viewer_can_access_all(
         viewer: Dict[str, Any] | None, *, include_unapproved: bool = False
     ) -> bool:
@@ -383,6 +396,7 @@ class Guide(Entity):
             raise DataError(f"Invalid data for updating guide: {e}")
 
         current = self.get(urn, viewer=actor, include_unapproved=True)
+        self._ensure_not_published_for_mutation(current)
 
         # Convert to dict and update in Elasticsearch
         update_dict = guide_data.model_dump(
@@ -420,12 +434,17 @@ class Guide(Entity):
             )
 
     def delete(self, urn: str) -> bool:
-        if GUIDELINE.has_guidelines_for_guide(urn):
-            raise ConflictError(
-                f"Guide {urn} still has linked guidelines. Delete them first."
-            )
+        current = self.get(urn, include_unapproved=True)
+        self._ensure_not_published_for_mutation(current)
 
-        # Permanently delete the guide
+        for guideline in GUIDELINE.fetch_for_guide(urn, include_unapproved=True):
+            GUIDELINE.delete_entity(guideline["id"])
+
+        for artifact in ARTIFACT.fetch(
+            parent_urn=urn, include_unapproved=True
+        ):
+            ARTIFACT.delete_entity(artifact["id"])
+
         try:
             ELASTIC_CLIENT.delete_entity(index_name=self.collection_name, urn=urn)
         except Exception as e:

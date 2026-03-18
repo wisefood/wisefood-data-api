@@ -92,7 +92,7 @@ def api_patch_guide(request: Request, urn: str, g: GuideUpdateSchema):
 
 @router.delete(
     "/{urn}",
-    dependencies=[Depends(auth(("admin", "expert")))],
+    dependencies=[Depends(auth(("admin")))],
     summary="Delete dietary guide",
     description="Delete a dietary guide from the system by its URN.",
 )

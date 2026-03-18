@@ -133,6 +133,18 @@ class Guideline(DependentEntity):
                 "Unpublish the guide first."
             )
 
+    def _ensure_parent_guide_not_published_for_deletion(
+        self, guide: Dict[str, Any]
+    ) -> None:
+        guide_is_published = (
+            guide.get("status") == "active" and guide.get("visibility") == "public"
+        )
+        if guide_is_published:
+            raise ConflictError(
+                "Guidelines cannot be deleted while the parent guide is published. "
+                "Unpublish the guide first."
+            )
+
     @staticmethod
     def _viewer_can_access_all(
         viewer: Dict[str, Any] | None, *, include_unapproved: bool = False
@@ -397,6 +409,8 @@ class Guideline(DependentEntity):
 
     def delete(self, id_: str) -> bool:
         current = self.get(id_, include_unapproved=True)
+        guide = self._get_guide(current["guide_urn"])
+        self._ensure_parent_guide_not_published_for_deletion(guide)
         try:
             ELASTIC_CLIENT.delete_entity(index_name=self.collection_name, urn=id_)
         except Exception as e:
