@@ -242,6 +242,20 @@ def validate_guide_publication(data: Dict[str, Any], *, partial: bool = False) -
     return data
 
 
+def normalize_optional_year_int(v):
+    if v is None:
+        return None
+
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return None
+        if v.isdigit():
+            return int(v)
+
+    return v
+
+
 class LicenseId(str, Enum):
     MIT = "MIT"
     Apache2 = "Apache-2.0"
@@ -479,6 +493,11 @@ class GuideSchema(BaseSchema):
         default_factory=list, description="External identifiers linked to the guide"
     )
 
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def normalize_publication_year(cls, v):
+        return normalize_optional_year_int(v)
+
     @model_validator(mode="after")
     def validate_workflow_and_publication(self):
         validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
@@ -502,6 +521,11 @@ class GuideRevisionSchema(BaseModel):
     previous_publication_year: Optional[int] = Field(
         None, description="Publication year of the previous guide"
     )
+
+    @field_validator("previous_publication_year", mode="before")
+    @classmethod
+    def normalize_previous_publication_year(cls, v):
+        return normalize_optional_year_int(v)
 
     @model_validator(mode="after")
     def validate_reference(self):
@@ -602,6 +626,11 @@ class GuideCreationSchema(BaseModel):
             raise ValueError("tags must be unique (case-insensitive)")
         return v
 
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def normalize_publication_year(cls, v):
+        return normalize_optional_year_int(v)
+
     @model_validator(mode="after")
     def validate_workflow_and_publication(self):
         validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
@@ -661,6 +690,11 @@ class GuideUpdateSchema(BaseModel):
         if v is not None and len(set(map(str.lower, v))) != len(v):
             raise ValueError("tags must be unique (case-insensitive)")
         return v
+
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def normalize_publication_year(cls, v):
+        return normalize_optional_year_int(v)
 
     @model_validator(mode="after")
     def validate_workflow_and_publication(self):

@@ -7,11 +7,13 @@ already attached to the parent guide.
 """
 
 import re
+import threading
 from typing import Dict, Any, List, Optional
 
 import logging
 
 from backend.elastic import ELASTIC_CLIENT
+from backend.redis import REDIS
 from catalog_access import (
     apply_catalog_visibility_filter,
     can_view_unapproved_catalog,
@@ -27,6 +29,7 @@ from schemas import (
     SearchSchema,
     validate_editorial_state,
 )
+from main import config
 
 logger = logging.getLogger(__name__)
 
@@ -101,22 +104,22 @@ class Guideline(DependentEntity):
         self, guide: Dict[str, Any], guideline_dict: Dict[str, Any]
     ) -> None:
         if guide.get("status") == "active" and (
-            guideline_dict.get("review_status") != "verified"
+            guideline_dict.get("status") != "active"
+            or guideline_dict.get("review_status") != "verified"
             or not guideline_dict.get("verifier_user_id")
         ):
             raise ConflictError(
-                "Cannot attach or keep an unverified guideline under an active guide."
+                "Guidelines under an active guide must be active and verified."
             )
 
-    def _apply_activation_visibility(
-        self, guideline_dict: Dict[str, Any], guide: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        if guideline_dict.get("status") == "active":
-            guide_is_published = (
-                guide.get("status") == "active" and guide.get("visibility") == "public"
+        if (
+            guide.get("status") == "active"
+            and guide.get("visibility") == "public"
+            and guideline_dict.get("visibility") != "public"
+        ):
+            raise ConflictError(
+                "Guidelines under a public guide must also be public."
             )
-            guideline_dict["visibility"] = "public" if guide_is_published else "internal"
-        return guideline_dict
 
     def _ensure_text_editable(
         self, current: Dict[str, Any], guide: Dict[str, Any], update_dict: Dict[str, Any]
@@ -188,13 +191,31 @@ class Guideline(DependentEntity):
         include_unapproved: bool = False,
     ) -> Dict[str, Any]:
         """Fetch a single guideline and enforce read visibility before returning it."""
-        entity = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=id_)
-        if entity is None:
-            raise NotFoundError(f"Guideline with ID {id_} not found.")
+        entity = self.get_cached(id_)
         self._ensure_visible_to_viewer(
             entity, viewer, include_unapproved=include_unapproved
         )
         return entity
+
+    def get_cached(self, identifier: str) -> Dict[str, Any]:
+        id_ = self.get_identifier(identifier)
+        obj = None
+
+        if config.settings.get("CACHE_ENABLED", False):
+            try:
+                obj = REDIS.get(id_)
+            except Exception as e:
+                logger.error(f"Failed to get cached guideline {id_}: {e}")
+
+        if obj is None:
+            obj = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=id_)
+            if obj is None:
+                raise NotFoundError(f"Guideline with ID {id_} not found.")
+            self.cache(id_, obj)
+
+        return self.dump_schema.model_validate(
+            self._strip_search_metadata(obj)
+        ).model_dump(mode="json")
 
     def _get_guide(self, guide_urn: str) -> Dict[str, Any]:
         guide = ELASTIC_CLIENT.get_entity(index_name="guides", urn=guide_urn)
@@ -329,7 +350,6 @@ class Guideline(DependentEntity):
         guideline_dict = self._apply_verifier_metadata(
             guideline_dict, creator, review_status_explicit=True
         )
-        guideline_dict = self._apply_activation_visibility(guideline_dict, guide)
         validate_editorial_state(guideline_dict)
         self._ensure_parent_guide_allows_guideline_state(guide, guideline_dict)
 
@@ -343,7 +363,6 @@ class Guideline(DependentEntity):
         except Exception as e:
             raise InternalError(f"Failed to create guideline: {e}")
 
-        self.invalidate_cache(guideline_dict["guide_urn"])
         return guideline_dict["id"]
 
     def create_entity(self, spec, creator) -> Dict[str, Any]:
@@ -352,8 +371,8 @@ class Guideline(DependentEntity):
 
     def patch_entity_with_actor(self, id_: str, spec: Dict[str, Any], actor: dict):
         identifier = self.get_identifier(id_)
-        self.invalidate_cache(identifier)
         self.patch(identifier, spec, actor=actor)
+        self.invalidate_cache(identifier)
         return self.get(identifier, viewer=actor, include_unapproved=True)
 
     def patch(self, id_: str, spec, actor: dict | None = None) -> None:
@@ -362,7 +381,7 @@ class Guideline(DependentEntity):
         except Exception as e:
             raise DataError(f"Invalid data for updating guideline: {e}")
 
-        current = self.get(id_, viewer=actor, include_unapproved=True)
+        current = self.get_cached(id_)
         update_dict = guideline_data.model_dump(
             mode="json", exclude_unset=True, exclude_none=True
         )
@@ -382,7 +401,6 @@ class Guideline(DependentEntity):
             review_status_explicit="review_status" in update_dict,
             current_verifier_user_id=current.get("verifier_user_id"),
         )
-        merged = self._apply_activation_visibility(merged, guide)
 
         self._validate_sequence_no(
             current["guide_urn"], merged["sequence_no"], exclude_id=id_
@@ -405,7 +423,7 @@ class Guideline(DependentEntity):
         except Exception as e:
             raise InternalError(f"Failed to update guideline: {e}")
 
-        self.invalidate_cache(current["guide_urn"])
+        self.invalidate_cache(id_)
 
     def delete(self, id_: str) -> bool:
         current = self.get(id_, include_unapproved=True)
@@ -416,7 +434,6 @@ class Guideline(DependentEntity):
         except Exception as e:
             raise InternalError(f"Failed to delete guideline: {e}")
 
-        self.invalidate_cache(current["guide_urn"])
         return {"deleted": id_}
 
     def fetch_for_guide(
@@ -566,52 +583,112 @@ class Guideline(DependentEntity):
         include_unapproved: bool = False,
     ) -> List[str]:
         """Return visible guideline IDs for guide hydration and related UI flows."""
-        return [
-            item["id"]
-            for item in self.fetch_for_guide(
-                guide_urn=guide_urn,
-                viewer=viewer,
+        guide = self._get_guide(guide_urn)
+        if not self._viewer_can_access_all(
+            viewer, include_unapproved=include_unapproved
+        ) and not is_approved_or_active(guide):
+            raise NotFoundError(f"Guide with URN {guide_urn} not found.")
+
+        qspec = SearchSchema.model_validate(
+            self._apply_viewer_filter(
+                {
+                    "limit": 1000,
+                    "offset": 0,
+                    "fl": ["id"],
+                    "fq": [f'guide_urn:"{guide_urn}"', "NOT status:deleted"],
+                    "sort": "sequence_no asc",
+                },
+                viewer,
                 include_unapproved=include_unapproved,
             )
+        )
+        response = ELASTIC_CLIENT.search_entities(
+            index_name=self.collection_name, qspec=qspec
+        )
+        return [
+            self._strip_search_metadata(item)["id"]
+            for item in response.get("results", [])
+            if "id" in self._strip_search_metadata(item)
         ]
 
     def has_guidelines_for_guide(self, guide_urn: str) -> bool:
         """Check for linked guidelines without applying public visibility restrictions."""
         return bool(self.list_ids_for_guide(guide_urn, include_unapproved=True))
 
+    def has_non_publishable_for_guide(
+        self, guide_urn: str, *, require_public_visibility: bool = False
+    ) -> bool:
+        """Return True when a linked guideline blocks the parent guide from being published."""
+        publishable_clause = (
+            "status:active AND review_status:verified AND _exists_:verifier_user_id"
+        )
+        if require_public_visibility:
+            publishable_clause = f"{publishable_clause} AND visibility:public"
+
+        qspec = SearchSchema.model_validate(
+            {
+                "limit": 1,
+                "offset": 0,
+                "fl": ["id"],
+                "fq": [
+                    f'guide_urn:"{guide_urn}"',
+                    "NOT status:deleted",
+                    f"NOT ({publishable_clause})",
+                ],
+            }
+        )
+        response = ELASTIC_CLIENT.search_entities(
+            index_name=self.collection_name, qspec=qspec
+        )
+        return bool(response.get("results"))
+
+    def _sync_parent_metadata_worker(self, guide_urn: str) -> None:
+        try:
+            guide = self._get_guide(guide_urn)
+            limit = 1000
+            offset = 0
+
+            while True:
+                qspec = SearchSchema.model_validate(
+                    {
+                        "limit": limit,
+                        "offset": offset,
+                        "fl": ["id"],
+                        "fq": [f'guide_urn:"{guide_urn}"', "NOT status:deleted"],
+                    }
+                )
+                response = ELASTIC_CLIENT.search_entities(
+                    index_name=self.collection_name, qspec=qspec
+                )
+                guidelines = response.get("results", [])
+                if not guidelines:
+                    break
+
+                for guideline in guidelines:
+                    update_dict = self.upsert_system_fields(
+                        {"id": guideline["id"], "guide_region": guide.get("region")},
+                        update=True,
+                    )
+                    ELASTIC_CLIENT.update_entity(
+                        index_name=self.collection_name, document=update_dict
+                    )
+                    self.invalidate_cache(guideline["id"])
+
+                if len(guidelines) < limit:
+                    break
+                offset += len(guidelines)
+        except Exception:
+            logger.exception(
+                "Failed to sync guideline guide_region for guide %s", guide_urn
+            )
+
     def sync_parent_metadata(self, guide_urn: str) -> None:
-        guide = self._get_guide(guide_urn)
-        for guideline in self.fetch_for_guide(
-            guide_urn=guide_urn, include_unapproved=True
-        ):
-            update_dict = self.upsert_system_fields(
-                {"id": guideline["id"], "guide_region": guide.get("region")},
-                update=True,
-            )
-            ELASTIC_CLIENT.update_entity(
-                index_name=self.collection_name, document=update_dict
-            )
-
-    def sync_publication_state(self, guide_urn: str, *, guide_status: str, guide_visibility: str) -> None:
-        guide_is_published = guide_status == "active" and guide_visibility == "public"
-
-        for guideline in self.fetch_for_guide(
-            guide_urn=guide_urn, include_unapproved=True
-        ):
-            if guideline.get("status") != "active":
-                continue
-
-            desired_visibility = "public" if guide_is_published else "internal"
-            if guideline.get("visibility") == desired_visibility:
-                continue
-
-            update_dict = self.upsert_system_fields(
-                {"id": guideline["id"], "visibility": desired_visibility},
-                update=True,
-            )
-            ELASTIC_CLIENT.update_entity(
-                index_name=self.collection_name, document=update_dict
-            )
+        threading.Thread(
+            target=self._sync_parent_metadata_worker,
+            args=(guide_urn,),
+            daemon=True,
+            name=f"guideline-region-sync-{guide_urn}",
+        ).start()
 
 
 GUIDELINE = Guideline()

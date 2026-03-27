@@ -134,8 +134,9 @@ Important concepts include:
 The API also enforces a number of domain rules:
 
 - a guide cannot become active unless it is verified
-- a guide cannot become active while it still contains unverified guidelines
-- active guidelines follow the publication state of their parent guide
+- a guide cannot become active while it still contains guidelines that are not active and verified
+- a public active guide also requires its linked guidelines to be public
+- guideline visibility is managed on each guideline and is not cascaded from the parent guide
 - guideline text is locked while the guideline is active and the parent guide is published
 - modifying published guideline text requires unpublishing the parent guide first
 
@@ -434,7 +435,7 @@ A few areas are intentionally still evolving:
 
 ### Current Testing State
 
-At the moment, the repository does not include a dedicated automated test suite under a `tests/` directory. In practice, much of the recent verification has been done through:
+Automated test coverage is still lightweight. In practice, much of the recent verification has been done through:
 
 - schema validation
 - targeted `py_compile` checks

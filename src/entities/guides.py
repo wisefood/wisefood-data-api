@@ -13,6 +13,7 @@ the underlying infrastructure provided by the Entity base class.
 from typing import Optional, List, Dict, Any
 
 from backend.elastic import ELASTIC_CLIENT
+from backend.redis import REDIS
 from catalog_access import (
     apply_catalog_visibility_filter,
     can_view_unapproved_catalog,
@@ -32,6 +33,7 @@ from schemas import (
     validate_editorial_state,
     validate_guide_publication,
 )
+from main import config
 
 from entity import Entity
 from entities.artifacts import ARTIFACT
@@ -98,15 +100,19 @@ class Guide(Entity):
         ):
             return
 
-        for guideline in GUIDELINE.fetch_for_guide(
-            guide_dict["urn"], include_unapproved=True
+        require_public_guidelines = guide_dict.get("visibility") == "public"
+        if GUIDELINE.has_non_publishable_for_guide(
+            guide_dict["urn"], require_public_visibility=require_public_guidelines
         ):
-            if guideline.get("review_status") != "verified" or not guideline.get(
-                "verifier_user_id"
-            ):
+            if require_public_guidelines:
                 raise ConflictError(
-                    "Guide cannot be active while it has unverified guidelines."
+                    "Guide cannot be active and public while it has guidelines "
+                    "that are not active, verified, and public."
                 )
+            raise ConflictError(
+                "Guide cannot be active while it has guidelines that are not "
+                "active and verified."
+            )
 
     @staticmethod
     def _is_published(guide_dict: Dict[str, Any]) -> bool:
@@ -186,17 +192,33 @@ class Guide(Entity):
     ) -> Dict[str, Any]:
         """Fetch a single guide and enforce read visibility before returning it."""
         identifier = self.get_identifier(urn)
-        entity = ELASTIC_CLIENT.get_entity(
-            index_name=self.collection_name, urn=identifier
-        )
-        if entity is None:
-            raise NotFoundError(f"Guide with URN {identifier} not found.")
+        entity = self.get_cached(identifier)
         self._ensure_visible_to_viewer(
             entity, viewer, include_unapproved=include_unapproved
         )
         return self._hydrate_guide(
             entity, viewer=viewer, include_unapproved=include_unapproved
         )
+
+    def get_cached(self, urn: str) -> Dict[str, Any]:
+        identifier = self.get_identifier(urn)
+        obj = None
+
+        if config.settings.get("CACHE_ENABLED", False):
+            try:
+                obj = REDIS.get(identifier)
+            except Exception as e:
+                logger.error(f"Failed to get cached guide {identifier}: {e}")
+
+        if obj is None:
+            obj = ELASTIC_CLIENT.get_entity(index_name=self.collection_name, urn=identifier)
+            if obj is None:
+                raise NotFoundError(f"Guide with URN {identifier} not found.")
+            self.cache(identifier, obj)
+
+        return self.dump_schema.model_validate(
+            self._strip_search_metadata(obj)
+        ).model_dump(mode="json")
 
     def get_entity(
         self,
@@ -384,8 +406,8 @@ class Guide(Entity):
         self, urn: str, spec: Dict[str, Any], actor: dict | None = None
     ):
         identifier = self.get_identifier(urn)
-        self.invalidate_cache(identifier)
         self.patch(identifier, spec, actor=actor)
+        self.invalidate_cache(identifier)
         return self.get_entity(identifier, viewer=actor, include_unapproved=True)
 
     def patch(self, urn: str, spec: GuideUpdateSchema, actor: dict | None = None):
@@ -395,13 +417,19 @@ class Guide(Entity):
         except Exception as e:
             raise DataError(f"Invalid data for updating guide: {e}")
 
-        current = self.get(urn, viewer=actor, include_unapproved=True)
+        current = self.get_cached(urn)
         self._ensure_not_published_for_mutation(current)
 
         # Convert to dict and update in Elasticsearch
+        normalized_update_dict = guide_data.model_dump(mode="json", exclude_unset=True)
         update_dict = guide_data.model_dump(
             mode="json", exclude_unset=True, exclude_none=True
         )
+        if (
+            "publication_year" in normalized_update_dict
+            and normalized_update_dict["publication_year"] is None
+        ):
+            update_dict["publication_year"] = None
         merged_guide = {**current, **update_dict, "urn": urn}
         merged_guide = self._apply_verifier_metadata(
             merged_guide,
@@ -426,12 +454,6 @@ class Guide(Entity):
 
         if "region" in update_dict:
             GUIDELINE.sync_parent_metadata(urn)
-        if "status" in update_dict or "visibility" in update_dict:
-            GUIDELINE.sync_publication_state(
-                urn,
-                guide_status=merged_guide["status"],
-                guide_visibility=merged_guide["visibility"],
-            )
 
     def delete(self, urn: str) -> bool:
         current = self.get(urn, include_unapproved=True)
