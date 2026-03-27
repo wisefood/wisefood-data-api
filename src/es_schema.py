@@ -626,6 +626,161 @@ def article_index(dim: int) -> Dict[str, Any]:
     }
 
 
+def textbook_index(dim: int) -> Dict[str, Any]:
+    return {
+        "settings": DEFAULT_SETTINGS,
+        "mappings": {
+            "properties": {
+                "urn": {"type": "keyword"},
+                "id": {"type": "keyword"},
+                "creator": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "publication_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "publication_year": {"type": "integer"},
+                "organization_urn": {"type": "keyword"},
+                "title": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {
+                        "keyword": {"type": "keyword"},
+                        "autocomplete": {
+                            "type": "text",
+                            "analyzer": "autocomplete",
+                            "search_analyzer": "default_text",
+                        },
+                    },
+                },
+                "subtitle": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                },
+                "description": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "authors": {"type": "keyword"},
+                "editors": {"type": "keyword"},
+                "publisher": {"type": "keyword"},
+                "edition": {"type": "keyword"},
+                "isbn10": {"type": "keyword"},
+                "isbn13": {"type": "keyword"},
+                "doi": {"type": "keyword"},
+                "topics": {"type": "keyword"},
+                "keywords": {"type": "keyword"},
+                "audience": {"type": "keyword"},
+                "tags": {"type": "keyword"},
+                "status": {"type": "keyword"},
+                "review_status": {"type": "keyword"},
+                "verifier_user_id": {"type": "keyword"},
+                "visibility": {"type": "keyword"},
+                "applicability_status": {"type": "keyword"},
+                "applicability_start_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "applicability_end_date": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "url": {"type": "keyword"},
+                "license": {"type": "keyword"},
+                "region": {"type": "keyword"},
+                "language": {"type": "keyword"},
+                "page_count": {"type": "integer"},
+                "structure_tree": {
+                    "type": "object",
+                    "enabled": False,
+                },
+                "artifacts": {
+                    "type": "nested",
+                    "properties": {
+                        "urn": {"type": "keyword"},
+                        "id": {"type": "keyword"},
+                        "title": {
+                            "type": "text",
+                            "analyzer": "default_text",
+                            "search_analyzer": "default_text",
+                        },
+                        "description": {
+                            "type": "text",
+                            "analyzer": "default_text",
+                            "search_analyzer": "default_text",
+                        },
+                        "file_url": {"type": "keyword"},
+                        "file_type": {"type": "keyword"},
+                        "file_size": {"type": "long"},
+                        "created_at": {
+                            "type": "date",
+                            "format": "strict_date_optional_time||epoch_millis",
+                        },
+                        "updated_at": {
+                            "type": "date",
+                            "format": "strict_date_optional_time||epoch_millis",
+                        },
+                        "type": {"type": "keyword"},
+                    },
+                },
+                "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "type": {"type": "keyword"},
+            }
+        },
+    }
+
+
+def textbook_passage_index(dim: int) -> Dict[str, Any]:
+    del dim
+    return {
+        "settings": DEFAULT_SETTINGS,
+        "mappings": {
+            "properties": {
+                "id": {"type": "keyword"},
+                "textbook_urn": {"type": "keyword"},
+                "artifact_id": {"type": "keyword"},
+                "page_no": {"type": "integer"},
+                "sequence_no": {"type": "integer"},
+                "text": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "char_start": {"type": "integer"},
+                "char_end": {"type": "integer"},
+                "structure_node_id": {"type": "keyword"},
+                "structure_path": {"type": "keyword"},
+                "extractor_name": {"type": "keyword"},
+                "extractor_run_id": {"type": "keyword"},
+                "creator": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+            }
+        },
+    }
+
+
 
 # ---------------------------------------------------------------------------
 # Engagement index (ratings / reactions / comments)

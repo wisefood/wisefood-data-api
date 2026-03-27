@@ -5,7 +5,11 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from backend.redis import REDIS
 from backend.elastic import ELASTIC_CLIENT
-from catalog_access import can_view_unapproved_catalog, is_approved_or_active
+from catalog_access import (
+    can_view_unapproved_catalog,
+    is_approved_or_active,
+    is_publicly_visible,
+)
 from backend.minio import MINIO_CLIENT, MINIO_PUBLIC_CLIENT
 from pathlib import Path
 from minio.error import S3Error
@@ -86,10 +90,17 @@ class Artifact(Entity):
         ):
             return
         if not parent_urn.startswith("urn:guide:"):
+            if not parent_urn.startswith("urn:textbook:"):
+                return
+
+        if parent_urn.startswith("urn:guide:"):
+            guide = ELASTIC_CLIENT.get_entity(index_name="guides", urn=parent_urn)
+            if guide is None or not is_approved_or_active(guide):
+                raise NotFoundError("Artifact not found.")
             return
 
-        guide = ELASTIC_CLIENT.get_entity(index_name="guides", urn=parent_urn)
-        if guide is None or not is_approved_or_active(guide):
+        textbook = ELASTIC_CLIENT.get_entity(index_name="textbooks", urn=parent_urn)
+        if textbook is None or not is_publicly_visible(textbook):
             raise NotFoundError("Artifact not found.")
 
     def fetch(
@@ -294,6 +305,30 @@ class Artifact(Entity):
             )
         return expires_in
 
+    def _ensure_parent_allows_new_artifact(self, parent_urn: str) -> None:
+        if not parent_urn.startswith("urn:textbook:"):
+            return
+
+        try:
+            qspec = SearchSchema.model_validate(
+                {
+                    "limit": 1,
+                    "offset": 0,
+                    "fq": [f'parent_urn:"{parent_urn}"'],
+                }
+            )
+        except Exception as e:
+            raise DataError(f"Invalid search query while validating textbook artifacts: {e}")
+
+        response = ELASTIC_CLIENT.search_entities(
+            index_name=self.collection_name, qspec=qspec
+        )
+        if response.get("results"):
+            raise DataError(
+                f"Textbook {parent_urn} already has an artifact attached. "
+                "Textbooks support only one artifact."
+            )
+
     def create_entity(self, spec, creator) -> Dict[str, Any]:
         """
         Create a new entity bundler method.
@@ -315,10 +350,12 @@ class Artifact(Entity):
                 raise DataError(f"Invalid data for creating artifact: {e}")
         else:
             artifact_data = spec
+        parent_urn = artifact_data.parent_urn if not override else spec["parent_urn"]
         # Check if the parent entity exists, this will throw NotFoundError if not
-        Entity.validate_existence(artifact_data.parent_urn if not override else spec["parent_urn"])
+        Entity.validate_existence(parent_urn)
+        self._ensure_parent_allows_new_artifact(parent_urn)
         # Invalidate parent cache since a new artifact is being added
-        self.invalidate_cache(artifact_data.parent_urn if not override else spec["parent_urn"])
+        self.invalidate_cache(parent_urn)
 
         artifact_data = artifact_data.model_dump(mode="json") if not override else artifact_data
         artifact_data["file_type"] = self._normalize_file_type(
@@ -470,6 +507,7 @@ class Artifact(Entity):
         
         # Validate parent exists
         Entity.validate_existence(parent_urn)
+        self._ensure_parent_allows_new_artifact(parent_urn)
  
         # Generate unique filename and ID 
         id = str(uuid.uuid4())
@@ -575,6 +613,12 @@ class Artifact(Entity):
     def delete(self, urn: str) -> bool:
         artifact = self.get(urn, include_unapproved=True)
         parent_urn = artifact.get("parent_urn")
+        artifact_id = str(artifact.get("id"))
+
+        if parent_urn and str(parent_urn).startswith("urn:textbook:"):
+            from entities.textbook_passages import TEXTBOOK_PASSAGE
+
+            TEXTBOOK_PASSAGE.delete_for_textbook(parent_urn, artifact_id=artifact_id)
 
         self._delete_bound_storage_object(artifact)
 

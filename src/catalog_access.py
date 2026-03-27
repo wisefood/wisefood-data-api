@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 PRIVILEGED_CATALOG_ROLES = frozenset({"admin", "expert"})
 APPROVED_OR_ACTIVE_FILTER = "(review_status:verified OR status:active)"
+PUBLIC_CATALOG_FILTER = "(visibility:public AND (review_status:verified OR status:active))"
 
 
 def extract_roles(claims: Dict[str, Any] | None) -> set[str]:
@@ -49,6 +50,33 @@ def apply_catalog_visibility_filter(
     filtered_query = dict(query)
     fq = list(filtered_query.get("fq") or [])
     fq.append(APPROVED_OR_ACTIVE_FILTER)
+    if exclude_deleted and "NOT status:deleted" not in fq:
+        fq.append("NOT status:deleted")
+    filtered_query["fq"] = fq
+    return filtered_query
+
+
+def is_publicly_visible(entity: Dict[str, Any] | None) -> bool:
+    """Return whether a catalog entity is publicly visible to non-privileged viewers."""
+    if not entity:
+        return False
+
+    return (
+        entity.get("visibility") == "public"
+        and (
+            entity.get("review_status") == "verified"
+            or entity.get("status") == "active"
+        )
+    )
+
+
+def apply_public_catalog_filter(
+    query: Dict[str, Any], *, exclude_deleted: bool = False
+) -> Dict[str, Any]:
+    """Append the explicit public visibility clause to an Elasticsearch-style search query."""
+    filtered_query = dict(query)
+    fq = list(filtered_query.get("fq") or [])
+    fq.append(PUBLIC_CATALOG_FILTER)
     if exclude_deleted and "NOT status:deleted" not in fq:
         fq.append("NOT status:deleted")
     filtered_query["fq"] = fq

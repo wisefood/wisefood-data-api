@@ -75,7 +75,7 @@ class Entity:
         self.creation_schema = creation_schema
         self.update_schema = update_schema
 
-        self.operations = Entity.OPERATIONS.copy()
+        self.operations = set(Entity.OPERATIONS)
         if update_schema is None:
             self.operations.remove("patch")
 
@@ -162,6 +162,9 @@ class Entity:
         elif entity_type == "article":
             if ELASTIC_CLIENT.get_entity(index_name="articles", urn=urn) is None:
                 raise NotFoundError(f"Article with URN {urn} not found.")
+        elif entity_type == "textbook":
+            if ELASTIC_CLIENT.get_entity(index_name="textbooks", urn=urn) is None:
+                raise NotFoundError(f"Textbook with URN {urn} not found.")
         elif entity_type == "organization":
             if ELASTIC_CLIENT.get_entity(index_name="organizations", urn=urn) is None:
                 raise NotFoundError(f"Organization with URN {urn} not found.")

@@ -9,6 +9,8 @@ from es_schema import (
     article_index,
     guide_index,
     guideline_index,
+    textbook_index,
+    textbook_passage_index,
     organization_index,
     person_index,
     artifact_index,
@@ -104,6 +106,8 @@ class ElasticsearchClientSingleton:
         ensure_index("recipes", recipe_collection_index(ES_DIM))
         ensure_index("guides", guide_index(ES_DIM))
         ensure_index("guidelines", guideline_index(ES_DIM))
+        ensure_index("textbooks", textbook_index(ES_DIM))
+        ensure_index("textbook_passages", textbook_passage_index(ES_DIM))
         ensure_index("artifacts", artifact_index(ES_DIM))
         ensure_index("articles", article_index(ES_DIM))
         ensure_index("organizations", organization_index(ES_DIM))

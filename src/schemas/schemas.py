@@ -210,6 +210,40 @@ def validate_editorial_state(
     return data
 
 
+def validate_textbook_editorial_state(
+    data: Dict[str, Any], *, partial: bool = False
+) -> Dict[str, Any]:
+    visibility = getattr(data.get("visibility"), "value", data.get("visibility"))
+    review_status = getattr(
+        data.get("review_status"), "value", data.get("review_status")
+    )
+    status = getattr(data.get("status"), "value", data.get("status"))
+    start = data.get("applicability_start_date")
+    end = data.get("applicability_end_date")
+
+    if start and end and end < start:
+        raise ValueError(
+            "applicability_end_date must be greater than or equal to applicability_start_date"
+        )
+
+    if visibility == Visibility.public.value:
+        if status in {Status.draft.value, Status.deleted.value}:
+            raise ValueError("public resources cannot have status 'draft' or 'deleted'")
+
+        allowed_review_statuses = {ReviewStatus.verified.value}
+        if status == Status.active.value:
+            allowed_review_statuses.add(ReviewStatus.unreviewed.value)
+
+        if not partial or "review_status" in data or "status" in data:
+            if review_status not in allowed_review_statuses:
+                allowed_values = "', '".join(sorted(allowed_review_statuses))
+                raise ValueError(
+                    f"public textbooks with status='{status}' must have review_status in '{allowed_values}'"
+                )
+
+    return data
+
+
 def validate_guide_publication(data: Dict[str, Any], *, partial: bool = False) -> Dict[str, Any]:
     publication_date = data.get("publication_date")
     publication_year = data.get("publication_year")
@@ -1392,6 +1426,440 @@ class ArticleEnhancementSchema(BaseModel):
         if not v:
             raise ValueError("fields must contain at least one AI enhancement")
         return v
+
+
+class TextbookStructureNodeKind(str, Enum):
+    part = "part"
+    chapter = "chapter"
+    section = "section"
+    subsection = "subsection"
+    appendix = "appendix"
+    other = "other"
+
+
+class TextbookStructureNodeSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    id: NonEmptyStr = Field(..., description="Stable identifier for this structure node")
+    title: NonEmptyStr = Field(..., description="Display title for the structure node")
+    kind: TextbookStructureNodeKind = Field(
+        default=TextbookStructureNodeKind.other,
+        description="Hierarchy node type",
+    )
+    page_start: int = Field(..., ge=1, description="First page covered by this node")
+    page_end: Optional[int] = Field(
+        None, ge=1, description="Last page covered by this node"
+    )
+    artifact_id: Optional[UUID] = Field(
+        None, description="Textbook artifact ID this node belongs to, if scoped"
+    )
+    children: List["TextbookStructureNodeSchema"] = Field(
+        default_factory=list, description="Nested structure nodes"
+    )
+
+    @model_validator(mode="after")
+    def validate_page_range(self):
+        if self.page_end is None:
+            self.page_end = self.page_start
+        if self.page_end < self.page_start:
+            raise ValueError("page_end must be greater than or equal to page_start")
+        return self
+
+
+class TextbookStructureTreeSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    roots: List[TextbookStructureNodeSchema] = Field(
+        default_factory=list,
+        description="Top-level chapter/section hierarchy for the textbook",
+    )
+
+
+class TextbookSchema(BaseSchema):
+    type: Literal["textbook"] = Field(
+        default="textbook", description="Resource type discriminator", exclude=True
+    )
+    organization_urn: Optional[UrnStr] = Field(
+        None, description="URN of the publishing organization"
+    )
+    subtitle: Optional[NonEmptyStr] = Field(
+        None, description="Optional subtitle of the textbook"
+    )
+    authors: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=1000)] = Field(
+        default_factory=list, description="Authors of the textbook"
+    )
+    editors: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=1000)] = Field(
+        default_factory=list, description="Editors of the textbook"
+    )
+    publisher: Optional[NonEmptyStr] = Field(
+        None, description="Publisher of the textbook"
+    )
+    edition: Optional[NonEmptyStr] = Field(
+        None, description="Edition label, e.g. 2nd edition"
+    )
+    isbn10: Optional[NonEmptyStr] = Field(None, description="ISBN-10 identifier")
+    isbn13: Optional[NonEmptyStr] = Field(None, description="ISBN-13 identifier")
+    doi: Optional[NonEmptyStr] = Field(None, description="DOI identifier")
+    topics: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] = Field(
+        default_factory=list, description="High-level topics covered by the textbook"
+    )
+    keywords: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=250)] = Field(
+        default_factory=list, description="Keywords for textbook discovery"
+    )
+    audience: Optional[NonEmptyStr] = Field(
+        None, description="Intended audience of the textbook"
+    )
+    region: Optional[NonEmptyStr] = Field(
+        None, description="Geographic region relevant to the textbook"
+    )
+    review_status: ReviewStatus = Field(
+        default=ReviewStatus.unreviewed,
+        description="Editorial review state for this textbook",
+    )
+    verifier_user_id: Optional[NonEmptyStr] = Field(
+        None, description="User ID of the reviewer who verified the textbook"
+    )
+    visibility: Visibility = Field(
+        default=Visibility.internal,
+        description="Whether the textbook is internal-only or public",
+    )
+    applicability_status: ApplicabilityStatus = Field(
+        default=ApplicabilityStatus.unknown,
+        description="Real-world applicability state of the textbook",
+    )
+    applicability_start_date: Optional[date] = Field(
+        None, description="Date when the textbook became applicable"
+    )
+    applicability_end_date: Optional[date] = Field(
+        None, description="Date when the textbook stopped being applicable"
+    )
+    publication_date: Optional[datetime] = Field(
+        None, description="Original publication date (UTC)"
+    )
+    publication_year: Optional[int] = Field(
+        None, description="Original publication year"
+    )
+    page_count: Optional[int] = Field(
+        None, ge=1, description="Total page count for the textbook"
+    )
+    structure_tree: TextbookStructureTreeSchema | None = Field(
+        None,
+        description="Hierarchical table-of-contents style structure anchored to page ranges",
+    )
+    artifacts: List[ArtifactSchema] = Field(default_factory=list)
+
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def normalize_publication_year(cls, v):
+        return normalize_optional_year_int(v)
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str]) -> List[str]:
+        if len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+    @model_validator(mode="after")
+    def validate_workflow_and_publication(self):
+        payload = self.model_dump(mode="python", exclude_none=True)
+        validate_textbook_editorial_state(payload)
+        validate_guide_publication(payload)
+        return self
+
+
+class TextbookCreationSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    urn: SlugStr = Field(..., description="URN slug for the textbook")
+    title: NonEmptyStr = Field(..., description="Human-readable title")
+    description: Optional[NonEmptyStr] = Field(
+        None, description="Summary/abstract of the textbook"
+    )
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=25)] = Field(
+        default_factory=list, description="Topic tags"
+    )
+    status: Status = Field(default=Status.draft, description="Lifecycle status")
+    url: Optional[HttpUrl] = Field(None, description="Canonical public URL")
+    license: Optional[LicenseId] = Field(None, description="License identifier")
+    language: Union[Iso639_1, None] = None
+    organization_urn: Optional[UrnStr] = Field(
+        None, description="URN of the publishing organization"
+    )
+    subtitle: Optional[NonEmptyStr] = None
+    authors: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=1000)] = Field(
+        default_factory=list
+    )
+    editors: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=1000)] = Field(
+        default_factory=list
+    )
+    publisher: Optional[NonEmptyStr] = None
+    edition: Optional[NonEmptyStr] = None
+    isbn10: Optional[NonEmptyStr] = None
+    isbn13: Optional[NonEmptyStr] = None
+    doi: Optional[NonEmptyStr] = None
+    topics: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] = Field(
+        default_factory=list
+    )
+    keywords: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=250)] = Field(
+        default_factory=list
+    )
+    audience: Optional[NonEmptyStr] = None
+    region: Optional[NonEmptyStr] = None
+    review_status: ReviewStatus = Field(default=ReviewStatus.unreviewed)
+    visibility: Visibility = Field(default=Visibility.internal)
+    applicability_status: ApplicabilityStatus = Field(
+        default=ApplicabilityStatus.unknown
+    )
+    applicability_start_date: Optional[date] = None
+    applicability_end_date: Optional[date] = None
+    publication_date: Optional[datetime] = None
+    publication_year: Optional[int] = Field(
+        None, description="Original publication year"
+    )
+    page_count: Optional[int] = Field(None, ge=1)
+    structure_tree: TextbookStructureTreeSchema | None = None
+    artifacts: List[ArtifactSchema] = Field(default_factory=list)
+
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def normalize_publication_year(cls, v):
+        return normalize_optional_year_int(v)
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str]) -> List[str]:
+        if len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+    @model_validator(mode="after")
+    def validate_workflow_and_publication(self):
+        payload = self.model_dump(mode="python", exclude_none=True)
+        validate_textbook_editorial_state(payload)
+        validate_guide_publication(payload)
+        return self
+
+
+class TextbookUpdateSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    title: Optional[NonEmptyStr] = None
+    description: Optional[NonEmptyStr] = None
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=25)] | None = None
+    status: Status | None = None
+    url: Optional[HttpUrl] = None
+    license: Optional[LicenseId] = None
+    language: Union[Iso639_1, None] = None
+    organization_urn: Optional[UrnStr] = None
+    subtitle: Optional[NonEmptyStr] = None
+    authors: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=1000)] | None = None
+    editors: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=1000)] | None = None
+    publisher: Optional[NonEmptyStr] = None
+    edition: Optional[NonEmptyStr] = None
+    isbn10: Optional[NonEmptyStr] = None
+    isbn13: Optional[NonEmptyStr] = None
+    doi: Optional[NonEmptyStr] = None
+    topics: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] | None = None
+    keywords: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=250)] | None = None
+    audience: Optional[NonEmptyStr] = None
+    region: Optional[NonEmptyStr] = None
+    review_status: ReviewStatus | None = None
+    visibility: Visibility | None = None
+    applicability_status: ApplicabilityStatus | None = None
+    applicability_start_date: date | None = None
+    applicability_end_date: date | None = None
+    publication_date: Optional[datetime] = None
+    publication_year: int | None = None
+    page_count: Optional[int] = Field(None, ge=1)
+    structure_tree: TextbookStructureTreeSchema | None = None
+    artifacts: List[ArtifactSchema] | None = None
+
+    @field_validator("publication_year", mode="before")
+    @classmethod
+    def normalize_publication_year(cls, v):
+        return normalize_optional_year_int(v)
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str] | None) -> List[str] | None:
+        if v is not None and len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+    @model_validator(mode="after")
+    def validate_workflow_and_publication(self):
+        payload = self.model_dump(mode="python", exclude_none=True)
+        validate_textbook_editorial_state(payload, partial=True)
+        validate_guide_publication(payload, partial=True)
+        return self
+
+
+class TextbookPassageSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    id: UUID = Field(..., description="Internal UUID")
+    textbook_urn: UrnStr = Field(..., description="URN of the parent textbook")
+    artifact_id: UUID = Field(..., description="Textbook artifact ID containing the passage")
+    page_no: int = Field(..., ge=1, description="Page number of the passage")
+    sequence_no: int = Field(..., ge=1, description="Order of the passage in the page stream")
+    text: NonEmptyAbstract = Field(..., description="Extracted passage text")
+    char_start: int = Field(..., ge=0, description="Start character offset on the page")
+    char_end: int = Field(..., ge=0, description="End character offset on the page")
+    structure_node_id: Optional[NonEmptyStr] = Field(
+        None, description="Matched structure tree node ID for this passage"
+    )
+    structure_path: List[NonEmptyStr] = Field(
+        default_factory=list, description="Human-readable path into the textbook structure"
+    )
+    extractor_name: Optional[NonEmptyStr] = Field(
+        None, description="Extractor service or model name"
+    )
+    extractor_run_id: Optional[NonEmptyStr] = Field(
+        None, description="Extractor run identifier"
+    )
+    creator: Optional[str] = Field(
+        None, description="Contact email for the creator/owner"
+    )
+    created_at: datetime = Field(..., description="Creation timestamp (UTC)")
+    updated_at: datetime = Field(..., description="Last-modified timestamp (UTC)")
+
+    @model_validator(mode="after")
+    def validate_offsets(self):
+        if self.char_end < self.char_start:
+            raise ValueError("char_end must be greater than or equal to char_start")
+        return self
+
+
+class TextbookPassageCreationSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    textbook_urn: UrnStr = Field(..., description="URN of the parent textbook")
+    artifact_id: UUID = Field(..., description="Textbook artifact ID containing the passage")
+    page_no: int = Field(..., ge=1, description="Page number of the passage")
+    sequence_no: Optional[int] = Field(
+        None, ge=1, description="Order of the passage in the page stream"
+    )
+    text: NonEmptyAbstract = Field(..., description="Extracted passage text")
+    char_start: int = Field(..., ge=0, description="Start character offset on the page")
+    char_end: int = Field(..., ge=0, description="End character offset on the page")
+    extractor_name: Optional[NonEmptyStr] = None
+    extractor_run_id: Optional[NonEmptyStr] = None
+
+    @model_validator(mode="after")
+    def validate_offsets(self):
+        if self.char_end < self.char_start:
+            raise ValueError("char_end must be greater than or equal to char_start")
+        return self
+
+
+class TextbookPassageUpdateSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    page_no: int | None = Field(None, ge=1, description="Page number of the passage")
+    sequence_no: Optional[int] = Field(
+        None, ge=1, description="Order of the passage in the page stream"
+    )
+    text: Optional[NonEmptyAbstract] = Field(
+        None, description="Extracted passage text"
+    )
+    char_start: int | None = Field(
+        None, ge=0, description="Start character offset on the page"
+    )
+    char_end: int | None = Field(
+        None, ge=0, description="End character offset on the page"
+    )
+    extractor_name: Optional[NonEmptyStr] = None
+    extractor_run_id: Optional[NonEmptyStr] = None
+
+    @model_validator(mode="after")
+    def validate_offsets(self):
+        if (
+            self.char_start is not None
+            and self.char_end is not None
+            and self.char_end < self.char_start
+        ):
+            raise ValueError("char_end must be greater than or equal to char_start")
+        return self
+
+
+class TextbookPassageImportItemSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    page_no: int = Field(..., ge=1, description="Page number of the passage")
+    sequence_no: Optional[int] = Field(
+        None, ge=1, description="Order of the passage in the page stream"
+    )
+    text: NonEmptyAbstract = Field(..., description="Extracted passage text")
+    char_start: int = Field(..., ge=0, description="Start character offset on the page")
+    char_end: int = Field(..., ge=0, description="End character offset on the page")
+
+    @model_validator(mode="after")
+    def validate_offsets(self):
+        if self.char_end < self.char_start:
+            raise ValueError("char_end must be greater than or equal to char_start")
+        return self
+
+
+class TextbookPassageBulkReplaceSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    artifact_id: UUID = Field(..., description="Textbook artifact ID these passages belong to")
+    page_count: Optional[int] = Field(
+        None, ge=1, description="Optional page count to write back to the textbook"
+    )
+    structure_tree: TextbookStructureTreeSchema | None = Field(
+        None,
+        description="Optional structure tree to write back to the textbook before anchoring passages",
+    )
+    extractor_name: Optional[NonEmptyStr] = Field(
+        None, description="Extractor service or model name applied to all passages"
+    )
+    extractor_run_id: Optional[NonEmptyStr] = Field(
+        None, description="Extractor run identifier applied to all passages"
+    )
+    passages: List[TextbookPassageImportItemSchema] = Field(
+        default_factory=list, description="Extracted passages to replace for this artifact"
+    )
+
+
+TextbookStructureNodeSchema.model_rebuild()
 
 
 class FoodCompositionTableSchema(BaseSchema):
