@@ -373,8 +373,8 @@ class ArtifactSchema(BaseModel):
         ..., description="URN of the parent resource (e.g., guide)"
     )
     title: NonEmptyStr = Field(..., description="Human-readable title")
-    description: NonEmptyStr = Field(
-        ..., description="Summary/abstract of the resource (<= 2000 chars)"
+    description: Optional[NonEmptyStr] = Field(
+        None, description="Summary/abstract of the resource (<= 2000 chars)"
     )
     type: Literal["artifact"] = Field(
         default="artifact", description="Resource type discriminator"
