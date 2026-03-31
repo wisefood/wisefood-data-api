@@ -513,6 +513,9 @@ class GuideSchema(BaseSchema):
     publication_date: Optional[datetime] = Field(
         None, description="Original publication date (UTC)"
     )
+    page_count: Optional[int] = Field(
+        None, ge=1, description="Total page count for the guide"
+    )
     artifacts: List[ArtifactSchema] = Field(default_factory=list)
     guidelines: List[UUID] = Field(
         default_factory=list, description="List of linked guideline IDs"
@@ -647,6 +650,9 @@ class GuideCreationSchema(BaseModel):
     publication_year: Optional[int] = Field(
         None, description="Original publication year"
     )
+    page_count: Optional[int] = Field(
+        None, ge=1, description="Total page count for the guide"
+    )
     revision: GuideRevisionSchema | None = None
     identifiers: List[GuideIdentifierSchema] = Field(default_factory=list)
     artifacts: List[ArtifactSchema] = Field(
@@ -711,6 +717,9 @@ class GuideUpdateSchema(BaseModel):
     applicability_start_date: date | None = None
     applicability_end_date: date | None = None
     publication_year: int | None = None
+    page_count: Optional[int] = Field(
+        None, ge=1, description="Total page count for the guide"
+    )
     revision: GuideRevisionSchema | None = None
     identifiers: List[GuideIdentifierSchema] | None = None
     organization_urn: Optional[UrnStr] = Field(

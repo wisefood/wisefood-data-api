@@ -215,6 +215,7 @@ def guide_index(dim: int) -> Dict[str, Any]:
                     "format": "strict_date_optional_time||epoch_millis",
                 },
                 "publication_year": {"type": "integer"},
+                "page_count": {"type": "integer"},
                 "organization_urn": {"type": "keyword"},
                 "title": {
                     "type": "text",
