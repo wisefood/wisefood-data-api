@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Depends
-from schemas import GuideCreationSchema, GuideUpdateSchema, SearchSchema
+from schemas import GuideCreationSchema, GuideUpdateSchema, SearchSchema, GuideAutocompleteSchema
 from routers.generic import render
 import kutils
 from auth import auth
@@ -21,6 +21,24 @@ def api_list_guides(
     viewer: dict = Depends(auth()),
 ):
     return GUIDE.list_entities(limit=limit, offset=offset, viewer=viewer)
+
+
+@router.get(
+    "/autocomplete",
+    summary="Autocomplete dietary guides",
+    description="Search guides by title prefix and return minimal representations for dropdown display.",
+)
+@render()
+def api_autocomplete_guides(
+    request: Request,
+    q: str = "",
+    limit: int = 15,
+    viewer: dict = Depends(auth()),
+):
+    query = {"q": q, "limit": limit, "fl": ["urn", "title", "short_title", "region", "publication_year"]}
+    response = GUIDE.search_entities(query=query, viewer=viewer)
+    results = response.get("results", []) if isinstance(response, dict) else response
+    return [GuideAutocompleteSchema.model_validate(r).model_dump(mode="json") for r in results]
 
 
 @router.get(

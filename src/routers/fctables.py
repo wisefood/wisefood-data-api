@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Depends, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 from routers.generic import render
-from schemas import FoodCompositionTableCreationSchema, FoodCompositionTableUpdateSchema, SearchSchema
+from schemas import FoodCompositionTableCreationSchema, FoodCompositionTableUpdateSchema, SearchSchema, FoodCompositionTableAutocompleteSchema
 import kutils
 from exceptions import DataError
 from entities.fctables import FCTABLE
@@ -22,6 +22,20 @@ router = APIRouter(prefix="/api/v1/fctables", tags=["Food Composition Tables Man
 @render()
 def api_list_fctables(request: Request, limit: int = 100, offset: int = 0):
     return FCTABLE.list_entities(limit=limit, offset=offset)
+
+
+@router.get(
+    "/autocomplete",
+    dependencies=[Depends(auth())],
+    summary="Autocomplete Food Composition Tables",
+    description="Search food composition tables by title prefix and return minimal representations for dropdown display.",
+)
+@render()
+def api_autocomplete_fctables(request: Request, q: str = "", limit: int = 15):
+    query = {"q": q, "limit": limit, "fl": ["urn", "title", "compiling_institution", "region"]}
+    response = FCTABLE.search_entities(query=query)
+    results = response.get("results", []) if isinstance(response, dict) else response
+    return [FoodCompositionTableAutocompleteSchema.model_validate(r).model_dump(mode="json") for r in results]
 
 
 @router.get(

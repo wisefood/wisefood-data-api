@@ -4,7 +4,7 @@ import kutils
 from auth import auth
 from entities.rcollections import RCOLLECTION
 from routers.generic import render
-from schemas import SearchSchema, RCollectionCreationSchema, RCollectionUpdateSchema
+from schemas import SearchSchema, RCollectionCreationSchema, RCollectionUpdateSchema, RCollectionAutocompleteSchema
 
 router = APIRouter(prefix="/api/v1/rcollections", tags=["RCollection Operations"])
 
@@ -22,6 +22,24 @@ def api_list_rcollections(
     viewer: dict = Depends(auth()),
 ):
     return RCOLLECTION.list_entities(limit=limit, offset=offset, viewer=viewer)
+
+
+@router.get(
+    "/autocomplete",
+    summary="Autocomplete recipe collections",
+    description="Search recipe collections by title prefix and return minimal representations for dropdown display.",
+)
+@render()
+def api_autocomplete_rcollections(
+    request: Request,
+    q: str = "",
+    limit: int = 15,
+    viewer: dict = Depends(auth()),
+):
+    query = {"q": q, "limit": limit, "fl": ["urn", "title", "source_type", "recipe_count"]}
+    response = RCOLLECTION.search_entities(query=query, viewer=viewer)
+    results = response.get("results", []) if isinstance(response, dict) else response
+    return [RCollectionAutocompleteSchema.model_validate(r).model_dump(mode="json") for r in results]
 
 
 @router.get(

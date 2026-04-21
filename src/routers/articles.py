@@ -6,6 +6,7 @@ from schemas import (
     ArticleUpdateSchema,
     SearchSchema,
     ArticleEnhancementSchema,
+    ArticleAutocompleteSchema,
 )
 import kutils
 from entities.articles import ARTICLE
@@ -28,6 +29,20 @@ router = APIRouter(prefix="/api/v1/articles", tags=["Articles Management Operati
 @render()
 def api_list_articles(request: Request, limit: int = 100, offset: int = 0):
     return ARTICLE.list_entities(limit=limit, offset=offset)
+
+
+@router.get(
+    "/autocomplete",
+    dependencies=[Depends(auth())],
+    summary="Autocomplete articles",
+    description="Search articles by title prefix and return minimal representations for dropdown display.",
+)
+@render()
+def api_autocomplete_articles(request: Request, q: str = "", limit: int = 15):
+    query = {"q": q, "limit": limit, "fl": ["urn", "title", "authors", "publication_year", "venue"]}
+    response = ARTICLE.search_entities(query=query)
+    results = response.get("results", []) if isinstance(response, dict) else response
+    return [ArticleAutocompleteSchema.model_validate(r).model_dump(mode="json") for r in results]
 
 
 @router.get(

@@ -2,9 +2,11 @@
 
 from . import schemas as _schemas
 from . import fct as _fct
+from . import autocomplete as _autocomplete
 
 from .schemas import *
 from .fct import *
+from .autocomplete import *
 
 def _public_names(module):
     return getattr(module, "__all__", [name for name in dir(module) if not name.startswith("_")])
@@ -12,4 +14,5 @@ def _public_names(module):
 __all__ = [
     *_public_names(_schemas),
     *_public_names(_fct),
+    *_public_names(_autocomplete),
 ]

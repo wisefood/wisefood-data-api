@@ -4,7 +4,7 @@ import kutils
 from auth import auth
 from entities.guidelines import GUIDELINE
 from routers.generic import render
-from schemas import GuidelineBulkImportSchema, GuidelineCreationSchema, GuidelineUpdateSchema, SearchSchema
+from schemas import GuidelineBulkImportSchema, GuidelineCreationSchema, GuidelineUpdateSchema, SearchSchema, GuidelineAutocompleteSchema
 
 router = APIRouter(prefix="/api/v1/guidelines", tags=["Dietary Guideline Operations"])
 
@@ -22,6 +22,24 @@ def api_list_guidelines(
     viewer: dict = Depends(auth()),
 ):
     return GUIDELINE.list(limit=limit, offset=offset, viewer=viewer)
+
+
+@router.get(
+    "/autocomplete",
+    summary="Autocomplete dietary guidelines",
+    description="Search guidelines by title/rule_text prefix and return minimal representations for dropdown display.",
+)
+@render()
+def api_autocomplete_guidelines(
+    request: Request,
+    q: str = "",
+    limit: int = 15,
+    viewer: dict = Depends(auth()),
+):
+    query = {"q": q, "limit": limit, "fl": ["id", "guide_urn", "title", "action_type"]}
+    response = GUIDELINE.search(query=query, viewer=viewer)
+    results = response.get("results", []) if isinstance(response, dict) else response
+    return [GuidelineAutocompleteSchema.model_validate(r).model_dump(mode="json") for r in results]
 
 
 @router.get(

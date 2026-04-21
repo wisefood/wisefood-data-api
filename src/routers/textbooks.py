@@ -4,7 +4,7 @@ import kutils
 from auth import auth
 from entities.textbooks import TEXTBOOK
 from routers.generic import render
-from schemas import SearchSchema, TextbookCreationSchema, TextbookUpdateSchema
+from schemas import SearchSchema, TextbookCreationSchema, TextbookUpdateSchema, TextbookAutocompleteSchema
 
 router = APIRouter(prefix="/api/v1/textbooks", tags=["Textbook Operations"])
 
@@ -22,6 +22,24 @@ def api_list_textbooks(
     viewer: dict = Depends(auth()),
 ):
     return TEXTBOOK.list_entities(limit=limit, offset=offset, viewer=viewer)
+
+
+@router.get(
+    "/autocomplete",
+    summary="Autocomplete textbooks",
+    description="Search textbooks by title prefix and return minimal representations for dropdown display.",
+)
+@render()
+def api_autocomplete_textbooks(
+    request: Request,
+    q: str = "",
+    limit: int = 15,
+    viewer: dict = Depends(auth()),
+):
+    query = {"q": q, "limit": limit, "fl": ["urn", "title", "subtitle", "authors", "publication_year"]}
+    response = TEXTBOOK.search_entities(query=query, viewer=viewer)
+    results = response.get("results", []) if isinstance(response, dict) else response
+    return [TextbookAutocompleteSchema.model_validate(r).model_dump(mode="json") for r in results]
 
 
 @router.get(
