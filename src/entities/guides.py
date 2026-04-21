@@ -459,8 +459,7 @@ class Guide(Entity):
         current = self.get(urn, include_unapproved=True)
         self._ensure_not_published_for_mutation(current)
 
-        for guideline in GUIDELINE.fetch_for_guide(urn, include_unapproved=True):
-            GUIDELINE.delete_entity(guideline["id"])
+        GUIDELINE.delete_for_guide(urn)
 
         for artifact in ARTIFACT.fetch(
             parent_urn=urn, include_unapproved=True

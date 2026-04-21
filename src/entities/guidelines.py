@@ -436,6 +436,16 @@ class Guideline(DependentEntity):
 
         return {"deleted": id_}
 
+    def delete_for_guide(self, guide_urn: str) -> None:
+        """Bulk-delete all guidelines for a guide in a single delete_by_query call."""
+        try:
+            ELASTIC_CLIENT.delete_by_query(
+                index_name=self.collection_name,
+                query={"term": {"guide_urn": guide_urn}},
+            )
+        except Exception as e:
+            raise InternalError(f"Failed to bulk-delete guidelines for guide {guide_urn}: {e}")
+
     def fetch_for_guide(
         self,
         guide_urn: str,
