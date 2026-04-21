@@ -171,6 +171,9 @@ class Entity:
         elif entity_type == "fctable":
             if ELASTIC_CLIENT.get_entity(index_name="fctables", urn=urn) is None:
                 raise NotFoundError(f"Food Composition Table with URN {urn} not found.")
+        elif entity_type == "rcollection":
+            if ELASTIC_CLIENT.get_entity(index_name="rcollections", urn=urn) is None:
+                raise NotFoundError(f"RCollection with URN {urn} not found.")
 
     def get_identifier(self, identifier: str) -> str:
         """
