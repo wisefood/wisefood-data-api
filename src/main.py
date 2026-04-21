@@ -133,6 +133,7 @@ from routers import (
     guides,
     guidelines,
     organizations,
+    rcollections,
     textbook_passages,
     textbooks,
 )
@@ -147,6 +148,7 @@ api.include_router(organizations.router)
 api.include_router(articles.router)
 api.include_router(fctables.router)
 api.include_router(artifacts.router)
+api.include_router(rcollections.router)
 api.include_router(core.router)
 
 if __name__ == "__main__":

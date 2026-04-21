@@ -18,12 +18,16 @@ from es_schema import (
     rag_chunk_index
 )
 from schemas import SearchSchema
+from exceptions import InvalidError
 import logging
 
 logger = logging.getLogger(__name__)
 
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
 ES_DIM = int(os.getenv("ES_DIM", 384))
+MAX_RESULT_WINDOW = int(os.getenv("ELASTIC_MAX_RESULT_WINDOW", "10000"))
+SCROLL_KEEPALIVE = os.getenv("ELASTIC_SCROLL_KEEPALIVE", "1m")
+SCROLL_BATCH_SIZE = int(os.getenv("ELASTIC_SCROLL_BATCH_SIZE", "1000"))
 
 DEFAULT_FACET_EXCLUDE_FIELDS = {
     # long text / content
@@ -130,13 +134,125 @@ class ElasticsearchClientSingleton:
             logger.exception("Error fetching entity %s from %s", urn, index_name)
             raise
 
+    @staticmethod
+    def _active_entities_query() -> Dict[str, Any]:
+        return {"bool": {"must_not": {"term": {"status": "deleted"}}}}
+
+    @staticmethod
+    def _validate_pagination(limit: int, offset: int) -> None:
+        if limit < 0 or offset < 0:
+            raise InvalidError("Limit and offset must be greater than or equal to 0.")
+
+    def _validate_result_window(self, *, limit: int, offset: int, operation: str) -> None:
+        self._validate_pagination(limit, offset)
+        result_window = limit + offset
+        if result_window <= MAX_RESULT_WINDOW:
+            return
+
+        raise InvalidError(
+            detail=(
+                f"{operation} pagination exceeds Elasticsearch's maximum result window "
+                f"of {MAX_RESULT_WINDOW}. Received offset={offset}, limit={limit}, "
+                f"window={result_window}."
+            ),
+            extra={"title": "InvalidPagination"},
+        )
+
+    def _scroll_entities(
+        self,
+        *,
+        index_name: str,
+        limit: int,
+        offset: int,
+        source: bool,
+    ) -> List[Dict[str, Any]]:
+        self._validate_pagination(limit, offset)
+        if limit == 0:
+            return []
+
+        batch_size = max(1, min(SCROLL_BATCH_SIZE, max(limit, 100)))
+        body: Dict[str, Any] = {
+            "size": batch_size,
+            "sort": ["_doc"],
+            "query": self._active_entities_query(),
+        }
+        if not source:
+            body["_source"] = False
+
+        logger.info(
+            "Using scroll fallback for %s (offset=%s, limit=%s)",
+            index_name,
+            offset,
+            limit,
+        )
+
+        scroll_id = None
+        skipped = 0
+        collected: List[Dict[str, Any]] = []
+
+        try:
+            response = self.client.search(
+                index=index_name,
+                body=body,
+                scroll=SCROLL_KEEPALIVE,
+            )
+            scroll_id = response.get("_scroll_id")
+
+            while True:
+                hits = response["hits"]["hits"]
+                if not hits:
+                    break
+
+                if skipped < offset:
+                    if skipped + len(hits) <= offset:
+                        skipped += len(hits)
+                    else:
+                        start = offset - skipped
+                        needed = limit - len(collected)
+                        collected.extend(hits[start : start + needed])
+                        skipped = offset
+                else:
+                    needed = limit - len(collected)
+                    collected.extend(hits[:needed])
+
+                if len(collected) >= limit:
+                    break
+
+                response = self.client.scroll(
+                    scroll_id=scroll_id,
+                    scroll=SCROLL_KEEPALIVE,
+                )
+                scroll_id = response.get("_scroll_id", scroll_id)
+
+            return collected
+        finally:
+            if scroll_id:
+                try:
+                    self.client.clear_scroll(scroll_id=scroll_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to clear scroll for %s", index_name, exc_info=True
+                    )
+
     def list_entities(
         self, index_name: str, size: int = 1000, offset: int = 0
     ) -> List[str]:
+        self._validate_pagination(size, offset)
+        if size + offset > MAX_RESULT_WINDOW:
+            hits = self._scroll_entities(
+                index_name=index_name,
+                limit=size,
+                offset=offset,
+                source=False,
+            )
+            return [h["_id"] for h in hits]
+
         body = {
             "from": offset,
             "size": size,
-            "query": {"bool": {"must_not": {"term": {"status": "deleted"}}}},
+            "_source": False,
+            "sort": ["_doc"],
+            "query": self._active_entities_query(),
         }
         r = self.client.search(index=index_name, body=body)
         return [h["_id"] for h in r["hits"]["hits"]]
@@ -144,10 +260,21 @@ class ElasticsearchClientSingleton:
     def fetch_entities(
         self, index_name: str, limit: int, offset: int
     ) -> List[Dict[str, Any]]:
+        self._validate_pagination(limit, offset)
+        if limit + offset > MAX_RESULT_WINDOW:
+            hits = self._scroll_entities(
+                index_name=index_name,
+                limit=limit,
+                offset=offset,
+                source=True,
+            )
+            return [hit["_source"] for hit in hits]
+
         body = {
             "from": offset,
             "size": limit,
-            "query": {"bool": {"must_not": {"term": {"status": "deleted"}}}},
+            "sort": ["_doc"],
+            "query": self._active_entities_query(),
         }
         r = self.client.search(index=index_name, body=body)
         return [hit["_source"] for hit in r["hits"]["hits"]]
@@ -356,6 +483,11 @@ class ElasticsearchClientSingleton:
 
     def search_entities(self, index_name: str, qspec) -> Dict[str, Any]:
         q = qspec.model_dump()
+        self._validate_result_window(
+            limit=q["limit"],
+            offset=q["offset"],
+            operation="Search",
+        )
 
         # ----------------------------
         # Query construction

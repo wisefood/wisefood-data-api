@@ -2138,3 +2138,179 @@ def normalize_publication_year(v):
         return v
 
     raise ValueError("Invalid publication_year format")
+
+
+# ---------------------------------------------------------------------------
+# RCollection — Recipe Collection Entity
+# ---------------------------------------------------------------------------
+
+
+class RCollectionSourceType(str, Enum):
+    dataset = "dataset"
+    web_portal = "web_portal"
+    manual_curation = "manual_curation"
+    partner = "partner"
+    user_generated = "user_generated"
+
+
+class RCollectionDataCompleteness(str, Enum):
+    full = "full"
+    partial = "partial"
+    minimal = "minimal"
+
+
+class RCollectionSchema(BaseSchema):
+    type: Literal["rcollection"] = Field(
+        default="rcollection", description="Resource type discriminator", exclude=True
+    )
+    source_type: RCollectionSourceType = Field(
+        ..., description="Origin/nature of the recipe collection"
+    )
+    image_url: Optional[HttpUrl] = Field(
+        None, description="Cover or thumbnail image URL for the collection"
+    )
+    organization_urn: Optional[UrnStr] = Field(
+        None, description="URN of the publishing or partner organization"
+    )
+    recipe_count: Optional[int] = Field(
+        None, ge=0, description="Total number of recipes in the collection (may be approximate)"
+    )
+    cuisines: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] = Field(
+        default_factory=list, description="Cuisines represented in the collection"
+    )
+    meal_types: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
+        default_factory=list, description="Meal types covered (e.g. breakfast, lunch, dinner)"
+    )
+    dietary_patterns: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
+        default_factory=list, description="Dietary patterns represented (e.g. vegan, gluten_free)"
+    )
+    geographic_coverage: Annotated[List[Iso3166_1a2], Field(min_length=0, max_length=250)] = Field(
+        default_factory=list, description="ISO 3166-1 alpha-2 country codes covered by this collection"
+    )
+    has_nutritional_data: Optional[bool] = Field(
+        None, description="Whether recipes include macro/micro nutritional data"
+    )
+    has_images: Optional[bool] = Field(
+        None, description="Whether recipes in this collection include images"
+    )
+    data_completeness: Optional[RCollectionDataCompleteness] = Field(
+        None, description="Overall completeness of recipe data in this collection"
+    )
+    is_curated: Optional[bool] = Field(
+        None, description="Whether recipes have been manually reviewed or enriched"
+    )
+    curation_notes: Optional[NonEmptyStr] = Field(
+        None, description="Internal notes on curation methodology or data quality"
+    )
+    review_status: ReviewStatus = Field(
+        default=ReviewStatus.unreviewed,
+        description="Editorial review state for this collection",
+    )
+    verifier_user_id: Optional[NonEmptyStr] = Field(
+        None, description="User ID of the reviewer who verified the collection"
+    )
+    visibility: Visibility = Field(
+        default=Visibility.internal,
+        description="Whether the collection is internal-only or public",
+    )
+    extras: Optional[Dict[str, Any]] = Field(
+        None, description="Source-specific metadata (not indexed)"
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str]) -> List[str]:
+        if len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+
+class RCollectionCreationSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    urn: SlugStr = Field(..., description="URN slug for the collection")
+    title: NonEmptyStr = Field(..., description="Human-readable title")
+    source_type: RCollectionSourceType = Field(
+        ..., description="Origin/nature of the recipe collection"
+    )
+    description: Optional[NonEmptyStr] = Field(None, description="Summary of the collection")
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=25)] = Field(
+        default_factory=list, description="Topic tags"
+    )
+    status: Status = Field(default=Status.draft, description="Lifecycle status")
+    url: Optional[HttpUrl] = Field(None, description="Canonical URL of the source")
+    license: Optional[LicenseId] = Field(None, description="License identifier")
+    language: Union[Iso639_1, None] = None
+    image_url: Optional[HttpUrl] = None
+    organization_urn: Optional[UrnStr] = None
+    recipe_count: Optional[int] = Field(None, ge=0)
+    cuisines: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] = Field(
+        default_factory=list
+    )
+    meal_types: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
+        default_factory=list
+    )
+    dietary_patterns: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
+        default_factory=list
+    )
+    geographic_coverage: Annotated[List[Iso3166_1a2], Field(min_length=0, max_length=250)] = Field(
+        default_factory=list
+    )
+    has_nutritional_data: Optional[bool] = None
+    has_images: Optional[bool] = None
+    data_completeness: Optional[RCollectionDataCompleteness] = None
+    is_curated: Optional[bool] = None
+    curation_notes: Optional[NonEmptyStr] = None
+    review_status: ReviewStatus = Field(default=ReviewStatus.unreviewed)
+    visibility: Visibility = Field(default=Visibility.internal)
+    extras: Optional[Dict[str, Any]] = None
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str]) -> List[str]:
+        if len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
+
+
+class RCollectionUpdateSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    title: Optional[NonEmptyStr] = None
+    description: Optional[NonEmptyStr] = None
+    source_type: Optional[RCollectionSourceType] = None
+    tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=25)] | None = None
+    status: Status | None = None
+    url: Optional[HttpUrl] = None
+    license: Optional[LicenseId] = None
+    language: Union[Iso639_1, None] = None
+    image_url: Optional[HttpUrl] = None
+    organization_urn: Optional[UrnStr] = None
+    recipe_count: Optional[int] = Field(None, ge=0)
+    cuisines: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=100)] | None = None
+    meal_types: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] | None = None
+    dietary_patterns: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] | None = None
+    geographic_coverage: Annotated[List[Iso3166_1a2], Field(min_length=0, max_length=250)] | None = None
+    has_nutritional_data: Optional[bool] = None
+    has_images: Optional[bool] = None
+    data_completeness: Optional[RCollectionDataCompleteness] = None
+    is_curated: Optional[bool] = None
+    curation_notes: Optional[NonEmptyStr] = None
+    review_status: ReviewStatus | None = None
+    visibility: Visibility | None = None
+    extras: Optional[Dict[str, Any]] = None
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, v: List[str] | None) -> List[str] | None:
+        if v is not None and len(set(map(str.lower, v))) != len(v):
+            raise ValueError("tags must be unique (case-insensitive)")
+        return v
