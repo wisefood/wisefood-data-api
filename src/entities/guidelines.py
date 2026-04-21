@@ -23,6 +23,7 @@ from entity import DependentEntity
 from entities.artifacts import ARTIFACT
 from exceptions import ConflictError, DataError, InternalError, NotFoundError
 from schemas import (
+    GuidelineBulkImportSchema,
     GuidelineCreationSchema,
     GuidelineSchema,
     GuidelineUpdateSchema,
@@ -435,6 +436,75 @@ class Guideline(DependentEntity):
             raise InternalError(f"Failed to delete guideline: {e}")
 
         return {"deleted": id_}
+
+    def bulk_import_for_guide(
+        self, guide_urn: str, spec: Dict[str, Any], creator: dict
+    ) -> Dict[str, Any]:
+        try:
+            import_data = GuidelineBulkImportSchema.model_validate(spec)
+        except Exception as e:
+            raise DataError(f"Invalid data for bulk importing guidelines: {e}")
+
+        guide = self._get_guide(guide_urn)
+        guide_region = guide.get("region")
+        creator_username = creator.get("preferred_username")
+
+        # Fetch current max sequence_no once to assign contiguous numbers
+        next_seq = self._next_sequence_no(guide_urn)
+
+        documents: List[Dict[str, Any]] = []
+        used_sequence_nos: set = set()
+
+        for item in import_data.guidelines:
+            guideline_dict = item.model_dump(mode="json")
+            guideline_dict["guide_urn"] = guide_urn
+            guideline_dict["guide_region"] = guide_region
+
+            if guideline_dict.get("title") is None:
+                guideline_dict["title"] = self._default_title(guideline_dict["rule_text"])
+
+            if guideline_dict.get("action_type") is None:
+                guideline_dict["action_type"] = self._infer_action_type(guideline_dict["rule_text"])
+
+            if guideline_dict.get("sequence_no") is None:
+                guideline_dict["sequence_no"] = next_seq
+                next_seq += 1
+            elif guideline_dict["sequence_no"] in used_sequence_nos:
+                raise DataError(
+                    f"Duplicate sequence_no {guideline_dict['sequence_no']} within the import batch."
+                )
+
+            used_sequence_nos.add(guideline_dict["sequence_no"])
+
+            guideline_dict["source_refs"] = self._normalize_source_refs(
+                guide_urn, guideline_dict.get("source_refs") or []
+            )
+            guideline_dict = self._apply_verifier_metadata(
+                guideline_dict, creator, review_status_explicit=True
+            )
+            validate_editorial_state(guideline_dict)
+            self._ensure_parent_guide_allows_guideline_state(guide, guideline_dict)
+
+            guideline_dict["creator"] = creator_username
+            guideline_dict = self.upsert_system_fields(guideline_dict, update=False)
+            documents.append(guideline_dict)
+
+        if documents:
+            try:
+                for document in documents:
+                    ELASTIC_CLIENT.client.index(
+                        index=self.collection_name,
+                        id=document["id"],
+                        document=document,
+                    )
+                ELASTIC_CLIENT.client.indices.refresh(index=self.collection_name)
+            except Exception as e:
+                raise InternalError(f"Failed to bulk index guidelines: {e}")
+
+        return {
+            "guide_urn": guide_urn,
+            "imported_count": len(documents),
+        }
 
     def delete_for_guide(self, guide_urn: str) -> None:
         """Bulk-delete all guidelines for a guide in a single delete_by_query call."""

@@ -4,7 +4,7 @@ import kutils
 from auth import auth
 from entities.guidelines import GUIDELINE
 from routers.generic import render
-from schemas import GuidelineCreationSchema, GuidelineUpdateSchema, SearchSchema
+from schemas import GuidelineBulkImportSchema, GuidelineCreationSchema, GuidelineUpdateSchema, SearchSchema
 
 router = APIRouter(prefix="/api/v1/guidelines", tags=["Dietary Guideline Operations"])
 
@@ -89,6 +89,26 @@ def api_search_guide_guidelines(
         guide_urn=guide_urn,
         query=q.model_dump(mode="json", exclude_none=True),
         viewer=viewer,
+    )
+
+
+@router.post(
+    "/by-guide/{guide_urn}/import",
+    dependencies=[Depends(auth(("admin", "expert")))],
+    summary="Bulk import guidelines for a guide",
+    description="Import up to 1000 guidelines into a guide in a single call. "
+                "sequence_no is auto-assigned for items that omit it.",
+)
+@render()
+def api_bulk_import_guidelines(
+    request: Request,
+    guide_urn: str,
+    payload: GuidelineBulkImportSchema,
+):
+    return GUIDELINE.bulk_import_for_guide(
+        guide_urn=guide_urn,
+        spec=payload.model_dump(mode="json"),
+        creator=kutils.current_user(request),
     )
 
 

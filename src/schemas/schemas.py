@@ -955,6 +955,45 @@ class GuidelineUpdateSchema(BaseModel):
 GuideSchema.model_rebuild()
 
 
+class GuidelineBulkImportItemSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    rule_text: NonEmptyAbstract = Field(..., description="Full text of the dietary guideline")
+    title: Optional[NonEmptyStr] = None
+    sequence_no: Optional[int] = Field(None, ge=1)
+    page_no: Optional[int] = Field(None, ge=1)
+    action_type: Optional["GuidelineActionType"] = None
+    target_populations: List["GuidelineTargetPopulation"] = Field(default_factory=list)
+    frequency: Optional["GuidelineFrequency"] = None
+    quantity: Optional["GuidelineQuantitySchema"] = None
+    food_groups: List["GuidelineFoodGroup"] = Field(default_factory=list)
+    source_refs: List["GuidelineSourceReferenceSchema"] = Field(default_factory=list)
+    notes: Optional[NonEmptyAbstract] = None
+    status: "Status" = Field(default=Status.draft)
+    review_status: "ReviewStatus" = Field(default=ReviewStatus.unreviewed)
+    visibility: "Visibility" = Field(default=Visibility.internal)
+    applicability_status: "ApplicabilityStatus" = Field(default=ApplicabilityStatus.unknown)
+    applicability_start_date: Optional[date] = None
+    applicability_end_date: Optional[date] = None
+
+
+class GuidelineBulkImportSchema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    guidelines: Annotated[
+        List[GuidelineBulkImportItemSchema],
+        Field(min_length=1, max_length=1000),
+    ] = Field(..., description="Guidelines to import (max 1000 per call)")
+
+
 class GeographicContextSchema(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
