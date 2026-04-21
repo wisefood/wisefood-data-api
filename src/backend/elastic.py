@@ -6,6 +6,7 @@ from elasticsearch import Elasticsearch, NotFoundError, BadRequestError
 from typing import Optional, List, Dict, Any
 from es_schema import (
     recipe_collection_index,
+    rcollection_index,
     article_index,
     guide_index,
     guideline_index,
@@ -107,7 +108,7 @@ class ElasticsearchClientSingleton:
                 logger.info("Creating index %s", name)
                 indices.create(index=name, body=body)
 
-        ensure_index("recipes", recipe_collection_index(ES_DIM))
+        ensure_index("rcollections", rcollection_index(ES_DIM))
         ensure_index("guides", guide_index(ES_DIM))
         ensure_index("guidelines", guideline_index(ES_DIM))
         ensure_index("textbooks", textbook_index(ES_DIM))

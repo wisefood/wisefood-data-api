@@ -115,6 +115,85 @@ def recipe_collection_index(dim: int) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Recipe source collection metadata
+# ---------------------------------------------------------------------------
+
+
+def rcollection_index(dim: int) -> Dict[str, Any]:
+    return {
+        "settings": DEFAULT_SETTINGS,
+        "mappings": {
+            "properties": {
+                "urn": {"type": "keyword"},
+                "id": {"type": "keyword"},
+                "title": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {
+                        "keyword": {"type": "keyword"},
+                        "autocomplete": {
+                            "type": "text",
+                            "analyzer": "autocomplete",
+                            "search_analyzer": "default_text",
+                        },
+                    },
+                },
+                "description": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "tags": {"type": "keyword"},
+                "status": {"type": "keyword"},
+                "creator": {"type": "keyword"},
+                "created_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "updated_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "url": {"type": "keyword"},
+                "license": {"type": "keyword"},
+                "language": {"type": "keyword"},
+                "source_type": {"type": "keyword"},
+                "image_url": {"type": "keyword"},
+                "organization_urn": {"type": "keyword"},
+                "recipe_count": {"type": "integer"},
+                "cuisines": {"type": "keyword"},
+                "meal_types": {"type": "keyword"},
+                "dietary_patterns": {"type": "keyword"},
+                "geographic_coverage": {"type": "keyword"},
+                "has_nutritional_data": {"type": "boolean"},
+                "has_images": {"type": "boolean"},
+                "data_completeness": {"type": "keyword"},
+                "is_curated": {"type": "boolean"},
+                "curation_notes": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "review_status": {"type": "keyword"},
+                "verifier_user_id": {"type": "keyword"},
+                "visibility": {"type": "keyword"},
+                "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
+                },
+                "type": {"type": "keyword"},
+                "extras": {
+                    "type": "object",
+                    "enabled": False,
+                },
+            }
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Artifact index
 # ---------------------------------------------------------------------------
 
