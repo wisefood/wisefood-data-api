@@ -866,8 +866,8 @@ class GuidelineSchema(BaseModel):
     creator: Optional[str] = Field(
         None, description="Contact email for the creator/owner"
     )
-    created_at: datetime = Field(..., description="Creation timestamp (UTC)")
-    updated_at: datetime = Field(..., description="Last-modified timestamp (UTC)")
+    created_at: Optional[datetime] = Field(None, description="Creation timestamp (UTC)")
+    updated_at: Optional[datetime] = Field(None, description="Last-modified timestamp (UTC)")
 
     @model_validator(mode="after")
     def validate_workflow(self):

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
 ES_DIM = int(os.getenv("ES_DIM", 384))
-MAX_RESULT_WINDOW = int(os.getenv("ELASTIC_MAX_RESULT_WINDOW", "10000"))
+MAX_RESULT_WINDOW = min(int(os.getenv("ELASTIC_MAX_RESULT_WINDOW", "10000")), 10000)
 SCROLL_KEEPALIVE = os.getenv("ELASTIC_SCROLL_KEEPALIVE", "1m")
 SCROLL_BATCH_SIZE = int(os.getenv("ELASTIC_SCROLL_BATCH_SIZE", "1000"))
 
