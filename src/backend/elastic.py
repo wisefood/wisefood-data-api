@@ -26,7 +26,15 @@ logger = logging.getLogger(__name__)
 
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
 ES_DIM = int(os.getenv("ES_DIM", 384))
-MAX_RESULT_WINDOW = min(int(os.getenv("ELASTIC_MAX_RESULT_WINDOW", "10000")), 10000)
+# Elasticsearch's index-level "max_result_window" defaults to 10000, which caps
+# from+size pagination and makes the bulk of a large corpus unreachable by
+# browsing. We raise it so every document is reachable via offset paging. The
+# value is applied to each index's settings in _bootstrap(). Keep this in sync
+# with the per-index "index.max_result_window" setting; a hard ceiling guards
+# against pathologically large windows that would blow up node heap.
+MAX_RESULT_WINDOW = min(
+    int(os.getenv("ELASTIC_MAX_RESULT_WINDOW", "50000")), 1_000_000
+)
 SCROLL_KEEPALIVE = os.getenv("ELASTIC_SCROLL_KEEPALIVE", "1m")
 SCROLL_BATCH_SIZE = int(os.getenv("ELASTIC_SCROLL_BATCH_SIZE", "1000"))
 
@@ -106,7 +114,19 @@ class ElasticsearchClientSingleton:
         def ensure_index(name: str, body: Dict[str, Any]) -> None:
             if not indices.exists(index=name):
                 logger.info("Creating index %s", name)
-                indices.create(index=name, body=body)
+                # Inject our raised result window into the new index's settings.
+                settings = dict(body.get("settings") or {})
+                settings.setdefault("index", {})
+                settings["index"] = {
+                    **settings["index"],
+                    "max_result_window": MAX_RESULT_WINDOW,
+                }
+                indices.create(index=name, body={**body, "settings": settings})
+            else:
+                # Index already exists (e.g. an established corpus): make sure
+                # its result window matches our current setting so deep browsing
+                # works without recreating/reindexing.
+                self._ensure_result_window(name)
 
         ensure_index("rcollections", rcollection_index(ES_DIM))
         ensure_index("guides", guide_index(ES_DIM))
@@ -119,6 +139,32 @@ class ElasticsearchClientSingleton:
         ensure_index("persons", person_index(ES_DIM))
         ensure_index("fctables", fctable_index(ES_DIM))
         ensure_index("rag_chunks", rag_chunk_index(ES_DIM))
+
+    def _ensure_result_window(self, name: str) -> None:
+        """Update an existing index's max_result_window if it's below our target."""
+        try:
+            current = self._client.indices.get_settings(index=name)
+            window = int(
+                current[name]["settings"]["index"].get("max_result_window", 10000)
+            )
+        except Exception:
+            window = 10000
+
+        if window >= MAX_RESULT_WINDOW:
+            return
+
+        try:
+            self._client.indices.put_settings(
+                index=name,
+                body={"index": {"max_result_window": MAX_RESULT_WINDOW}},
+            )
+            logger.info(
+                "Raised max_result_window on %s to %s", name, MAX_RESULT_WINDOW
+            )
+        except Exception:
+            logger.warning(
+                "Failed to update max_result_window on %s", name, exc_info=True
+            )
 
     # --- Simple helpers -----------------------------------------------------
 
@@ -704,6 +750,14 @@ class ElasticsearchClientSingleton:
 
         client = self.client
         old_index = None
+
+        # Ensure rebuilt/migrated indices carry our raised result window so
+        # deep browsing keeps working after a reindex.
+        settings = dict(settings or {})
+        settings["index"] = {
+            **(settings.get("index") or {}),
+            "max_result_window": MAX_RESULT_WINDOW,
+        }
 
         # ─────────────────────────────────────────────
         # 1️⃣ Resolve old index (alias OR concrete index)
