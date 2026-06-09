@@ -500,6 +500,11 @@ class ElasticsearchClientSingleton:
                     "multi_match": {
                         "query": q["q"],
                         "fields": ["*"],
+                        # Require every term in the query to match. Without this,
+                        # multi_match defaults to OR, so a query like
+                        # "avocado health results" matches any doc containing any
+                        # single (often common) term, ballooning the hit count.
+                        "operator": "and",
                     }
                 }
             )
@@ -512,6 +517,11 @@ class ElasticsearchClientSingleton:
         body: Dict[str, Any] = {
             "from": q["offset"],
             "size": q["limit"],
+            # Count all matching docs exactly instead of capping at ES's default
+            # of 10000. Otherwise hits.total.value saturates at 10000 (relation
+            # "gte"), which makes the UI render unreachable pages past the result
+            # window and report a misleading "10000" total.
+            "track_total_hits": True,
             "query": {
                 "bool": {
                     "must": must_clauses,
@@ -667,6 +677,9 @@ class ElasticsearchClientSingleton:
             "results": results,
             "facets": facets,
             "total": response["hits"]["total"]["value"],
+            # Largest offset+limit the backend will serve. The UI uses this to
+            # clamp pagination so it never requests a window the API will reject.
+            "max_result_window": MAX_RESULT_WINDOW,
         }
 
     from typing import Dict, Any
