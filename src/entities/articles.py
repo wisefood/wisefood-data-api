@@ -10,7 +10,7 @@ and serialization. It implements the CRUD operations while leveraging
 the underlying infrastructure provided by the Entity base class.
 """
 
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
 from backend.elastic import ELASTIC_CLIENT
 from entities.artifacts import ARTIFACT
 from datetime import datetime
@@ -195,6 +195,173 @@ class Article(Entity):
             "agent": spec.agent,
         }
 
+
+    # ------------------------------------------------------------------ #
+    # Editorial policy (reader visibility + indexing tier)
+    # ------------------------------------------------------------------ #
+
+    # A console click must not be able to rewrite the whole corpus by accident.
+    POLICY_MAX_DOCS = 10000
+    POLICY_PREVIEW_SIZE = 25
+
+    def _policy_query(
+        self,
+        *,
+        urns: Optional[List[str]] = None,
+        q: Optional[str] = None,
+        fq: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build the selection query for a batch policy edit.
+
+        Mirrors the search semantics of ``POST /articles/search`` (``q`` full
+        text with AND, ``fq`` query-string filters) so the console can apply an
+        edit to exactly the result set the editor is looking at.
+        """
+        must: List[Dict[str, Any]] = []
+        filters: List[Dict[str, Any]] = [{"bool": {"must_not": {"term": {"status": "deleted"}}}}]
+
+        if urns:
+            filters.append({"terms": {"urn": list(urns)}})
+        if q and q.strip():
+            must.append(
+                {"multi_match": {"query": q.strip(), "fields": ["*"], "operator": "and"}}
+            )
+        for clause in fq or []:
+            if isinstance(clause, str) and clause.strip():
+                filters.append({"query_string": {"query": clause.strip()}})
+
+        return {"bool": {"must": must, "filter": filters}}
+
+    def set_editorial_policy(
+        self,
+        *,
+        urns: Optional[List[str]] = None,
+        q: Optional[str] = None,
+        fq: Optional[List[str]] = None,
+        reader_visibility: Optional[str] = None,
+        indexing_tier: Optional[str] = None,
+        clear_indexing_tier: bool = False,
+        max_docs: Optional[int] = None,
+        dry_run: bool = False,
+        updater=None,
+    ) -> Dict[str, Any]:
+        """
+        Set reader visibility and/or indexing tier on every matching article.
+
+        Selection is either an explicit URN list, a query, or both. A scripted
+        update-by-query applies the change in one pass, so articles indexed
+        before these fields existed simply gain them.
+
+        ``dry_run`` reports what would change (count plus a sample) and writes
+        nothing — the console should always preview a query-driven edit first.
+        """
+        if reader_visibility is None and indexing_tier is None and not clear_indexing_tier:
+            raise DataError(
+                "Specify reader_visibility and/or indexing_tier (or clear_indexing_tier)."
+            )
+
+        if not urns and not (q and q.strip()) and not fq:
+            raise DataError(
+                "Refusing to apply an editorial policy to every article: "
+                "provide urns, a query, or filters."
+            )
+
+        query = self._policy_query(urns=urns, q=q, fq=fq)
+
+        try:
+            matched = ELASTIC_CLIENT.count_by_query(
+                index_name=self.collection_name, query=query
+            )
+        except Exception as e:
+            raise InternalError(f"Failed to count matching articles: {e}")
+
+        limit = min(int(max_docs or self.POLICY_MAX_DOCS), self.POLICY_MAX_DOCS)
+
+        # Read the affected documents up front: the head of this list is the
+        # console's preview, and the full list is what we must evict from the
+        # per-URN read cache once the update lands.
+        affected: List[Dict[str, Any]] = []
+        if matched:
+            try:
+                affected = ELASTIC_CLIENT.search_documents(
+                    index_name=self.collection_name,
+                    query=query,
+                    size=min(matched, limit),
+                    source_includes=[
+                        "urn",
+                        "title",
+                        "reader_visibility",
+                        "indexing_tier",
+                        "ai_indexing_tier",
+                    ],
+                )
+            except Exception:
+                logger.warning("Could not read articles for policy edit", exc_info=True)
+
+        preview = affected[: self.POLICY_PREVIEW_SIZE]
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "matched": matched,
+                "updated": 0,
+                "capped": matched > limit,
+                "max_docs": limit,
+                "sample": preview,
+            }
+
+        assignments: List[str] = ["ctx._source.updated_at = params.now"]
+        params: Dict[str, Any] = {"now": datetime.now().isoformat()}
+
+        if reader_visibility is not None:
+            assignments.append("ctx._source.reader_visibility = params.reader_visibility")
+            params["reader_visibility"] = reader_visibility
+        if clear_indexing_tier:
+            # Back to whatever the enrichment agent proposed.
+            assignments.append("ctx._source.remove('indexing_tier')")
+        elif indexing_tier is not None:
+            assignments.append("ctx._source.indexing_tier = params.indexing_tier")
+            params["indexing_tier"] = indexing_tier
+
+        try:
+            result = ELASTIC_CLIENT.update_by_query(
+                index_name=self.collection_name,
+                query=query,
+                script_source="; ".join(assignments),
+                params=params,
+                max_docs=limit,
+            )
+        except Exception as e:
+            raise InternalError(f"Failed to apply editorial policy: {e}")
+
+        # Cached article reads would otherwise keep serving the old policy.
+        for doc in affected:
+            urn = doc.get("urn")
+            if urn:
+                self.invalidate_cache(urn)
+        for urn in urns or []:
+            self.invalidate_cache(urn)
+
+        logger.info(
+            "Editorial policy applied by %s: matched=%s updated=%s visibility=%s tier=%s",
+            updater,
+            matched,
+            result.get("updated"),
+            reader_visibility,
+            "(cleared)" if clear_indexing_tier else indexing_tier,
+        )
+
+        return {
+            "dry_run": False,
+            "matched": matched,
+            "updated": result.get("updated", 0),
+            "capped": matched > limit,
+            "max_docs": limit,
+            "version_conflicts": result.get("version_conflicts", 0),
+            "failures": result.get("failures", []),
+            "sample": preview,
+        }
 
     def patch(self, urn: str, spec: Dict[str, Any], updater=None) -> Dict[str, Any]:
         """Partially update an existing article."""

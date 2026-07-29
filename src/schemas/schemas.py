@@ -56,6 +56,7 @@ class AIEnhancedField(str, Enum):
     AI_TAGS = "ai_tags"
     AI_CATEGORY = "ai_category"
     AI_KEY_TAKEAWAYS = "ai_key_takeaways"
+    AI_INDEXING_TIER = "ai_indexing_tier"
 
 class SearchSchema(BaseModel):
     q: Optional[str] = Field(default=None, description="Search query string")
@@ -116,6 +117,45 @@ class ReviewStatus(str, Enum):
 class Visibility(str, Enum):
     internal = "internal"
     public = "public"
+
+
+class ReaderVisibility(str, Enum):
+    """
+    Which readers an article reaches.
+
+    Distinct from :class:`Visibility`, which governs staff/API access. This axis
+    is about the *end reader*: an article can be sound but too technical, too
+    easily misread, or too narrow to put in front of a lay audience without
+    withdrawing it from the corpus.
+
+    - ``public``: every reader (the default, and what an absent value means)
+    - ``expert_only``: readers at expert level only; hidden from beginner and
+      intermediate readers and from anonymous ones
+    - ``hidden``: no reader; still retrievable through the catalog API for
+      editors, unlike ``status='deleted'``
+    """
+
+    public = "public"
+    expert_only = "expert_only"
+    hidden = "hidden"
+
+
+class IndexingTier(str, Enum):
+    """
+    How strongly an article should be favoured when retrieving evidence.
+
+    ``prime`` outranks every tier the enrichment model can assign (it only emits
+    ``core`` and below), so a prime article is always a deliberate editorial
+    choice — the way to give an influential paper primacy. ``do_not_index``
+    keeps an article in the catalog but out of retrieval entirely.
+    """
+
+    prime = "prime"
+    core = "core"
+    supportive = "supportive"
+    specialized = "specialized"
+    archive_only = "archive_only"
+    do_not_index = "do_not_index"
 
 
 class ApplicabilityStatus(str, Enum):
@@ -1128,6 +1168,32 @@ class ArticleSchema(BaseSchema):
     )
 
     # ----------------------------
+    # Editorial controls (human-authoritative, override the AI's proposal)
+    # ----------------------------
+    reader_visibility: ReaderVisibility = Field(
+        default=ReaderVisibility.public,
+        description=(
+            "Which readers this article reaches. Articles indexed before this "
+            "field existed carry no value and are treated as 'public'."
+        ),
+    )
+    indexing_tier: Optional[IndexingTier] = Field(
+        None,
+        description=(
+            "Editorial retrieval tier. Overrides ai_indexing_tier; leave unset to "
+            "let the enrichment agent's proposal stand."
+        ),
+    )
+
+    ai_indexing_tier: Optional[IndexingTier] = Field(
+        None,
+        description=(
+            "Retrieval tier proposed by the enrichment agent. Never editor-set; "
+            "write it through the /enhance endpoint."
+        ),
+    )
+
+    # ----------------------------
     # Human-authoritative classification
     # ----------------------------
     tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
@@ -1239,6 +1305,14 @@ class ArticleCreationSchema(BaseModel):
     extras: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Arbitrary metadata (e.g., evaluation, annotations)",
+    )
+
+    reader_visibility: ReaderVisibility = Field(
+        default=ReaderVisibility.public,
+        description="Which readers this article reaches",
+    )
+    indexing_tier: Optional[IndexingTier] = Field(
+        None, description="Editorial retrieval tier (overrides ai_indexing_tier)"
     )
 
     tags: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=50)] = Field(
@@ -1362,6 +1436,20 @@ class ArticleUpdateSchema(BaseModel):
     )
     annotation_confidence: Optional[float] = Field(None, ge=0, le=1)
     extras: Optional[Dict[str, Any]] = None
+    reader_visibility: Optional[ReaderVisibility] = Field(
+        None,
+        description=(
+            "Which readers this article reaches: public | expert_only | hidden. "
+            "Omit to leave unchanged."
+        ),
+    )
+    indexing_tier: Optional[IndexingTier] = Field(
+        None,
+        description=(
+            "Editorial retrieval tier, overriding the agent's ai_indexing_tier. "
+            "Omit to leave unchanged."
+        ),
+    )
     external_id: Optional[NonEmptyStr] = Field(
         None,
         description="External identifier (e.g., PubMed ID, Semantic Scholar ID)",
@@ -1474,6 +1562,84 @@ class ArticleEnhancementSchema(BaseModel):
         if not v:
             raise ValueError("fields must contain at least one AI enhancement")
         return v
+
+
+class ArticleEditorialPolicySchema(BaseModel):
+    """
+    Batch edit of reader visibility and/or indexing tier.
+
+    Selection mirrors ``POST /articles/search``: pass an explicit ``urns`` list,
+    a free-text ``q``, ``fq`` filter clauses, or any combination. At least one
+    selector is required — there is deliberately no "apply to everything" form.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    urns: Annotated[List[UrnStr], Field(min_length=0, max_length=10000)] = Field(
+        default_factory=list,
+        description="Explicit article URNs to update",
+    )
+    q: Optional[str] = Field(
+        None, description="Free-text query; every term must match (AND)"
+    )
+    fq: Optional[List[NonEmptyStr]] = Field(
+        None,
+        description=(
+            "Filter clauses in query-string syntax, e.g. "
+            "['study_type:\"Meta-analysis\"', 'topics:\"Cardiovascular health\"']"
+        ),
+    )
+
+    reader_visibility: Optional[ReaderVisibility] = Field(
+        None, description="New reader visibility; omit to leave unchanged"
+    )
+    indexing_tier: Optional[IndexingTier] = Field(
+        None, description="New editorial tier; omit to leave unchanged"
+    )
+    clear_indexing_tier: bool = Field(
+        default=False,
+        description=(
+            "Remove the editorial tier so the agent's ai_indexing_tier applies "
+            "again. Mutually exclusive with indexing_tier."
+        ),
+    )
+
+    max_docs: Optional[int] = Field(
+        None,
+        ge=1,
+        le=10000,
+        description="Cap on documents to update (defaults to the 10000 hard cap)",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Report what would change without writing anything",
+    )
+
+    @model_validator(mode="after")
+    def validate_selection_and_change(self):
+        if not self.urns and not (self.q and self.q.strip()) and not self.fq:
+            raise ValueError(
+                "Provide at least one selector: urns, q, or fq. "
+                "Applying a policy to the entire corpus is not supported."
+            )
+        if self.indexing_tier is not None and self.clear_indexing_tier:
+            raise ValueError(
+                "indexing_tier and clear_indexing_tier are mutually exclusive."
+            )
+        if (
+            self.reader_visibility is None
+            and self.indexing_tier is None
+            and not self.clear_indexing_tier
+        ):
+            raise ValueError(
+                "Nothing to change: set reader_visibility, indexing_tier, "
+                "or clear_indexing_tier."
+            )
+        return self
 
 
 class TextbookStructureNodeKind(str, Enum):

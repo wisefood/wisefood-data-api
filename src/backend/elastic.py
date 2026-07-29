@@ -127,6 +127,7 @@ class ElasticsearchClientSingleton:
                 # its result window matches our current setting so deep browsing
                 # works without recreating/reindexing.
                 self._ensure_result_window(name)
+                self._ensure_mapping_fields(name, body)
 
         ensure_index("rcollections", rcollection_index(ES_DIM))
         ensure_index("guides", guide_index(ES_DIM))
@@ -139,6 +140,63 @@ class ElasticsearchClientSingleton:
         ensure_index("persons", person_index(ES_DIM))
         ensure_index("fctables", fctable_index(ES_DIM))
         ensure_index("rag_chunks", rag_chunk_index(ES_DIM))
+
+    def _ensure_mapping_fields(self, name: str, body: Dict[str, Any]) -> None:
+        """
+        Add mapping properties this code knows about but the live index lacks.
+
+        Without this, a field added to ``es_schema`` never reaches an existing
+        corpus: ``ensure_index`` only builds mappings at creation time. Worse,
+        the first document written with an unmapped string field gets ES's
+        dynamic ``text`` + ``.keyword`` treatment, and a term filter on it
+        silently matches nothing — a type that then cannot be corrected without
+        a full reindex.
+
+        Only *new* top-level properties are pushed. Changing the type of an
+        existing field is not something ES allows in place, so those are left
+        alone (and logged) rather than attempted.
+        """
+        desired = ((body.get("mappings") or {}).get("properties")) or {}
+        if not desired:
+            return
+
+        try:
+            current = self._client.indices.get_mapping(index=name)
+            live = (
+                current[name]["mappings"].get("properties", {})
+                if name in current
+                else {}
+            )
+        except Exception:
+            logger.warning("Could not read mapping for %s", name, exc_info=True)
+            return
+
+        missing = {
+            field: definition
+            for field, definition in desired.items()
+            if field not in live
+        }
+        if not missing:
+            return
+
+        try:
+            self._client.indices.put_mapping(
+                index=name,
+                body={"properties": missing},
+            )
+            logger.info(
+                "Added %d mapping field(s) to existing index %s: %s",
+                len(missing),
+                name,
+                ", ".join(sorted(missing)),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to add mapping fields %s to %s",
+                ", ".join(sorted(missing)),
+                name,
+                exc_info=True,
+            )
 
     def _ensure_result_window(self, name: str) -> None:
         """Update an existing index's max_result_window if it's below our target."""
@@ -414,6 +472,72 @@ class ElasticsearchClientSingleton:
             body={"query": query},
             refresh=True,
         )
+
+    def search_documents(
+        self,
+        index_name: str,
+        query: Dict[str, Any],
+        *,
+        size: int = 25,
+        source_includes: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch matching documents with an explicit field projection."""
+        body: Dict[str, Any] = {"size": size, "query": query}
+        source_config: Any = True
+        if source_includes:
+            source_config = {"includes": source_includes}
+
+        response = self.client.search(
+            index=index_name, body=body, source=source_config
+        )
+        return [hit.get("_source", {}) for hit in response["hits"]["hits"]]
+
+    def count_by_query(self, index_name: str, query: Dict[str, Any]) -> int:
+        """Exact number of documents a query matches."""
+        response = self.client.count(index=index_name, body={"query": query})
+        return int(response.get("count", 0))
+
+    def update_by_query(
+        self,
+        index_name: str,
+        query: Dict[str, Any],
+        *,
+        script_source: str,
+        params: Optional[Dict[str, Any]] = None,
+        max_docs: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Apply a scripted field update to every document a query matches.
+
+        One round trip instead of read-modify-write per document, which also
+        means documents indexed before the field existed simply gain it.
+
+        ``max_docs`` bounds the blast radius: callers should always set it so a
+        mistyped query cannot rewrite the whole corpus.
+        """
+        body: Dict[str, Any] = {
+            "query": query,
+            "script": {
+                "source": script_source,
+                "lang": "painless",
+                "params": params or {},
+            },
+        }
+        if max_docs is not None:
+            body["max_docs"] = int(max_docs)
+
+        response = self.client.update_by_query(
+            index=index_name,
+            body=body,
+            refresh=True,
+            conflicts="proceed",
+        )
+        return {
+            "total": response.get("total", 0),
+            "updated": response.get("updated", 0),
+            "version_conflicts": response.get("version_conflicts", 0),
+            "failures": response.get("failures", []),
+        }
 
     # --- Search with faceting ----------------------------------------------
 

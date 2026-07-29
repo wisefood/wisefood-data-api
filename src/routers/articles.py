@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from routers.generic import render
 from schemas import (
     ArticleCreationSchema,
+    ArticleEditorialPolicySchema,
     ArticleUpdateSchema,
     SearchSchema,
     ArticleEnhancementSchema,
@@ -100,6 +101,41 @@ def api_search_articles(request: Request, q: SearchSchema):
 @render()
 def api_patch_article(request: Request, urn: str, a: ArticleUpdateSchema):
     return ARTICLE.patch_entity(urn, a.model_dump(mode="json"))
+
+
+@router.post(
+    "/policy",
+    dependencies=[Depends(auth(("admin", "expert")))],
+    summary="Batch-edit editorial policy",
+    description=(
+        "Set reader visibility and/or indexing tier on every article matching a "
+        "selection. Select by explicit URN list, by free-text query `q`, by `fq` "
+        "filter clauses, or any combination — the same semantics as "
+        "`POST /articles/search`, so the console can apply an edit to exactly "
+        "the result set the editor is browsing.\n\n"
+        "`reader_visibility` controls who reads the article: `public` (everyone), "
+        "`expert_only` (hidden from beginner/intermediate readers) or `hidden` "
+        "(no readers). `indexing_tier` controls retrieval priority, with `prime` "
+        "reserved for editorially promoted, influential work; send "
+        "`clear_indexing_tier` to fall back to the agent's `ai_indexing_tier`.\n\n"
+        "Send `dry_run: true` first: it returns the match count and a sample "
+        "without writing. Updates are capped at 10000 documents, and a selection "
+        "matching the entire corpus is rejected."
+    ),
+)
+@render()
+def api_set_article_policy(request: Request, a: ArticleEditorialPolicySchema):
+    return ARTICLE.set_editorial_policy(
+        urns=a.urns,
+        q=a.q,
+        fq=a.fq,
+        reader_visibility=a.reader_visibility,
+        indexing_tier=a.indexing_tier,
+        clear_indexing_tier=a.clear_indexing_tier,
+        max_docs=a.max_docs,
+        dry_run=a.dry_run,
+        updater=kutils.current_user(request),
+    )
 
 
 @router.patch(

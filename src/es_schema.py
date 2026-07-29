@@ -634,6 +634,17 @@ def article_index(dim: int) -> Dict[str, Any]:
                 # ----------------------------
                 # Study metadata (structured, filterable)
                 # ----------------------------
+                # ----------------------------
+                # Editorial controls (human-authoritative)
+                # ----------------------------
+                # Documents indexed before these fields existed simply omit
+                # them; every reader/query treats an absent value as
+                # "public" with no tier, so legacy articles keep behaving
+                # exactly as they did.
+                "reader_visibility": {"type": "keyword"},
+                "indexing_tier": {"type": "keyword"},
+                "ai_indexing_tier": {"type": "keyword"},
+
                 "keywords": {"type": "keyword"},
                 "reader_group": {"type": "keyword"},
                 "age_group": {"type": "keyword"},
