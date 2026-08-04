@@ -147,8 +147,11 @@ class EmbeddingWorker:
         # Compute embedding vector
         vector = self.model.encode(text).tolist()
 
+        # Not every entity is keyed by URN: guidelines are dependent records
+        # addressed by UUID, so the job names its own identifier field.
+        identifier_field = job.get("identifier_field", "urn")
         document = {
-            "urn": urn,
+            identifier_field: urn,
             job.get("vector_field", "embedding"): vector,
             "embedded_at": datetime.now().isoformat(),
         }
@@ -156,7 +159,13 @@ class EmbeddingWorker:
         if not index_name:
             raise ValueError("Job payload missing 'index_name' for entity_embedding")
 
-        ELASTIC_CLIENT.update_entity(index_name=index_name, document=document)
+        # Nothing reads the vector synchronously after this write, so waiting
+        # for a refresh would only serialize the worker behind the index's
+        # refresh cycle — the difference between a backfill taking minutes and
+        # taking an hour.
+        ELASTIC_CLIENT.update_entity(
+            index_name=index_name, document=document, refresh=False
+        )
 
     def _process_rag_chunks(self, job: Dict[str, Any]) -> None:
         """

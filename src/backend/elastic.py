@@ -2,7 +2,7 @@ import os
 import re
 import threading
 from datetime import datetime
-from elasticsearch import Elasticsearch, NotFoundError, BadRequestError
+from elasticsearch import Elasticsearch, NotFoundError, BadRequestError, helpers
 from typing import Optional, List, Dict, Any
 from es_schema import (
     recipe_collection_index,
@@ -38,6 +38,33 @@ MAX_RESULT_WINDOW = min(
 SCROLL_KEEPALIVE = os.getenv("ELASTIC_SCROLL_KEEPALIVE", "1m")
 SCROLL_BATCH_SIZE = int(os.getenv("ELASTIC_SCROLL_BATCH_SIZE", "1000"))
 
+# Every index this service owns, and how to build its mapping. Bootstrap walks
+# this, and so does the admin index-state view — a single list means an index
+# cannot be created at startup yet be invisible to operators.
+INDEX_BUILDERS = {
+    "rcollections": rcollection_index,
+    "guides": guide_index,
+    "guidelines": guideline_index,
+    "textbooks": textbook_index,
+    "textbook_passages": textbook_passage_index,
+    "artifacts": artifact_index,
+    "articles": article_index,
+    "organizations": organization_index,
+    "persons": person_index,
+    "fctables": fctable_index,
+    "rag_chunks": rag_chunk_index,
+}
+
+# Indices whose documents carry a semantic vector, and the field each is keyed
+# by — used to report embedding coverage.
+EMBEDDED_INDEX_IDENTIFIERS = {
+    "articles": "urn",
+    "guidelines": "id",
+    "guides": "urn",
+    "textbooks": "urn",
+    "rcollections": "urn",
+}
+
 DEFAULT_FACET_EXCLUDE_FIELDS = {
     # long text / content
     "abstract",
@@ -47,6 +74,7 @@ DEFAULT_FACET_EXCLUDE_FIELDS = {
     "bio",
     "text",
     "snippet",
+    "page_summary",
     "key_takeaways",
     "ai_key_takeaways",
     # semantic-only
@@ -78,6 +106,13 @@ NON_FACET_SEMANTIC_FIELDS = {
     "verifier_user_id",
     "license",
     "ai_generated_fields",
+
+    # extraction / enrichment provenance
+    "extractor_name",
+    "extractor_run_id",
+    "extraction_model",
+    "enrichment_version",
+    "enrichment_confidence",
 }
 
 
@@ -129,17 +164,8 @@ class ElasticsearchClientSingleton:
                 self._ensure_result_window(name)
                 self._ensure_mapping_fields(name, body)
 
-        ensure_index("rcollections", rcollection_index(ES_DIM))
-        ensure_index("guides", guide_index(ES_DIM))
-        ensure_index("guidelines", guideline_index(ES_DIM))
-        ensure_index("textbooks", textbook_index(ES_DIM))
-        ensure_index("textbook_passages", textbook_passage_index(ES_DIM))
-        ensure_index("artifacts", artifact_index(ES_DIM))
-        ensure_index("articles", article_index(ES_DIM))
-        ensure_index("organizations", organization_index(ES_DIM))
-        ensure_index("persons", person_index(ES_DIM))
-        ensure_index("fctables", fctable_index(ES_DIM))
-        ensure_index("rag_chunks", rag_chunk_index(ES_DIM))
+        for name, builder in INDEX_BUILDERS.items():
+            ensure_index(name, builder(ES_DIM))
 
     def _ensure_mapping_fields(self, name: str, body: Dict[str, Any]) -> None:
         """
@@ -396,7 +422,23 @@ class ElasticsearchClientSingleton:
     def delete_entity(self, index_name: str, urn: str) -> None:
         self.client.delete(index=index_name, id=urn, refresh="wait_for")
 
-    def update_entity(self, index_name: str, document: Dict[str, Any]) -> None:
+    def update_entity(
+        self,
+        index_name: str,
+        document: Dict[str, Any],
+        *,
+        refresh: Any = "wait_for",
+    ) -> None:
+        """
+        Merge a partial document into an existing entity.
+
+        ``refresh`` defaults to ``wait_for`` because most callers are servicing
+        a request that will immediately re-read what it just wrote. Bulk writers
+        should pass ``refresh=False``: ``wait_for`` blocks until the index's next
+        refresh cycle (a second by default), which serializes a few thousand
+        background writes into an hour of waiting for no benefit, since nothing
+        reads those documents synchronously.
+        """
         identifier = document.get("urn", document.get("id"))
         if not identifier:
             raise ValueError("document must include either 'urn' or 'id'")
@@ -414,7 +456,7 @@ class ElasticsearchClientSingleton:
             index=index_name,
             id=identifier,
             doc=merged,
-            refresh="wait_for",
+            refresh=refresh,
         )
 
     def enhance_entity(
@@ -465,6 +507,229 @@ class ElasticsearchClientSingleton:
                 },
             },
         )
+
+    # ------------------------------------------------------------------ #
+    # Operational introspection (admin console)
+    # ------------------------------------------------------------------ #
+
+    def cluster_state(self) -> Dict[str, Any]:
+        """Cluster health, or a reachable=False report if the cluster is down."""
+        try:
+            health = self.client.cluster.health()
+        except Exception as exc:
+            logger.warning("Could not read cluster health: %s", exc)
+            return {"reachable": False, "error": str(exc)}
+
+        return {
+            "reachable": True,
+            "cluster_name": health.get("cluster_name"),
+            "status": health.get("status"),
+            "number_of_nodes": health.get("number_of_nodes"),
+            "active_shards": health.get("active_shards"),
+            "unassigned_shards": health.get("unassigned_shards"),
+        }
+
+    def index_state(self) -> List[Dict[str, Any]]:
+        """
+        Per-index doc counts, size, and mapping drift against the code.
+
+        ``missing_fields`` is the point of this: it names the top-level mapping
+        properties `es_schema` defines that the live index lacks. Startup adds
+        them automatically, so a non-empty list means the index predates a
+        change and has not been restarted into — or the field type conflicts and
+        the additive migration skipped it, which needs a reindex.
+
+        Three cluster round trips regardless of index count: mappings and
+        settings are fetched for every index at once. Asking per index turned an
+        admin page load into ~34 sequential calls.
+        """
+        names = list(INDEX_BUILDERS)
+        joined = ",".join(names)
+
+        def safe(call, default):
+            try:
+                return call()
+            except Exception as exc:
+                logger.warning("Index introspection call failed: %s", exc)
+                return default
+
+        stats = safe(
+            lambda: self.client.indices.stats(metric="docs,store").get("indices", {}),
+            {},
+        )
+        # ignore_unavailable keeps a single missing index from failing the batch.
+        mappings = safe(
+            lambda: self.client.indices.get_mapping(
+                index=joined, ignore_unavailable=True
+            ),
+            {},
+        )
+        settings = safe(
+            lambda: self.client.indices.get_settings(
+                index=joined, ignore_unavailable=True
+            ),
+            {},
+        )
+
+        # An index reached through an alias reports under its concrete name, so
+        # build a lookup that resolves either form.
+        def resolve(source: Dict[str, Any], name: str):
+            if name in source:
+                return name, source[name]
+            for concrete, value in source.items():
+                aliases = value.get("aliases") if isinstance(value, dict) else None
+                if aliases and name in aliases:
+                    return concrete, value
+            return None, None
+
+        report: List[Dict[str, Any]] = []
+        for name, builder in INDEX_BUILDERS.items():
+            concrete, mapping_entry = resolve(mappings, name)
+            entry: Dict[str, Any] = {"index": name, "exists": mapping_entry is not None}
+
+            if mapping_entry is None:
+                report.append(entry)
+                continue
+
+            if concrete and concrete != name:
+                entry["concrete_index"] = concrete
+
+            resolved_stats = stats.get(concrete or name) or {}
+            primaries = resolved_stats.get("primaries", {})
+            entry["doc_count"] = primaries.get("docs", {}).get("count")
+            entry["deleted_docs"] = primaries.get("docs", {}).get("deleted")
+            entry["size_bytes"] = primaries.get("store", {}).get("size_in_bytes")
+
+            live_props = mapping_entry.get("mappings", {}).get("properties", {})
+            expected_props = builder(ES_DIM).get("mappings", {}).get("properties", {})
+            entry["mapped_fields"] = len(live_props)
+            entry["missing_fields"] = sorted(set(expected_props) - set(live_props))
+
+            _, settings_entry = resolve(settings, name)
+            index_settings = (
+                (settings_entry or {}).get("settings", {}).get("index", {})
+            )
+            window = index_settings.get("max_result_window")
+            entry["max_result_window"] = int(window) if window else None
+            entry["expected_max_result_window"] = MAX_RESULT_WINDOW
+
+            report.append(entry)
+
+        return report
+
+    def embedding_state(self) -> List[Dict[str, Any]]:
+        """
+        Embedding coverage per index: how many documents carry a vector.
+
+        ``missing`` is what a backfill would have to process, so this is how an
+        operator knows whether hybrid retrieval is safe to switch on.
+
+        One round trip for every index: a terms aggregation over ``_index`` with
+        an embedded sub-filter, rather than two counts per index.
+        """
+        names = list(EMBEDDED_INDEX_IDENTIFIERS)
+        report: Dict[str, Dict[str, Any]] = {
+            name: {"index": name, "identifier_field": identifier, "exists": False}
+            for name, identifier in EMBEDDED_INDEX_IDENTIFIERS.items()
+        }
+
+        try:
+            response = self.client.search(
+                index=",".join(names),
+                ignore_unavailable=True,
+                body={
+                    "size": 0,
+                    "query": {
+                        "bool": {"must_not": [{"term": {"status": "deleted"}}]}
+                    },
+                    "aggs": {
+                        "per_index": {
+                            "terms": {"field": "_index", "size": len(names) * 2},
+                            "aggs": {
+                                "embedded": {
+                                    "filter": {"exists": {"field": "embedded_at"}}
+                                }
+                            },
+                        }
+                    },
+                },
+            )
+        except Exception as exc:
+            logger.warning("Could not read embedding coverage: %s", exc)
+            for entry in report.values():
+                entry["error"] = str(exc)
+            return list(report.values())
+
+        buckets = response.get("aggregations", {}).get("per_index", {}).get("buckets", [])
+        for bucket in buckets:
+            concrete = bucket.get("key", "")
+            # Match a concrete index back to the alias this service knows it by.
+            name = next(
+                (candidate for candidate in names if concrete.startswith(candidate)),
+                None,
+            )
+            if name is None:
+                continue
+
+            total = bucket.get("doc_count", 0)
+            embedded = bucket.get("embedded", {}).get("doc_count", 0)
+            report[name].update(
+                {
+                    "exists": True,
+                    "total": total,
+                    "embedded": embedded,
+                    "missing": max(total - embedded, 0),
+                    "coverage": round(embedded / total, 4) if total else None,
+                }
+            )
+
+        return list(report.values())
+
+    def bulk_index(
+        self,
+        index_name: str,
+        documents: List[Dict[str, Any]],
+        *,
+        id_field: str = "urn",
+        refresh: bool = True,
+        chunk_size: int = 500,
+    ) -> Dict[str, Any]:
+        """
+        Index many documents in one pass.
+
+        Indexing document-by-document costs a round trip each, so a thousand-rule
+        import spent its time in network latency rather than in Elasticsearch.
+
+        Raises on any failed document: a partial import that reports success
+        would leave a guide with silently missing rules.
+        """
+        if not documents:
+            return {"indexed": 0}
+
+        actions = [
+            {
+                "_index": index_name,
+                "_id": document.get(id_field),
+                "_source": document,
+            }
+            for document in documents
+        ]
+
+        indexed, errors = helpers.bulk(
+            self.client,
+            actions,
+            chunk_size=chunk_size,
+            refresh=refresh,
+            raise_on_error=False,
+        )
+
+        if errors:
+            raise InvalidError(
+                f"{len(errors)} of {len(documents)} document(s) failed to index "
+                f"into {index_name}: {errors[:3]}"
+            )
+
+        return {"indexed": indexed}
 
     def delete_by_query(self, index_name: str, query: Dict[str, Any]) -> None:
         self.client.delete_by_query(

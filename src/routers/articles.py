@@ -138,6 +138,30 @@ def api_set_article_policy(request: Request, a: ArticleEditorialPolicySchema):
     )
 
 
+@router.post(
+    "/embeddings/backfill",
+    dependencies=[Depends(auth(("admin",)))],
+    summary="Queue existing articles for embedding",
+    description=(
+        "Queue stored articles for semantic embedding. Defaults to articles that "
+        "have no vector yet, so the call is safe to repeat and resumable after an "
+        "interruption. Use dry_run to see how many would be queued."
+    ),
+)
+@render()
+def api_backfill_article_embeddings(
+    request: Request,
+    only_missing: bool = True,
+    max_docs: int | None = None,
+    dry_run: bool = False,
+):
+    return ARTICLE.backfill_embeddings(
+        only_missing=only_missing,
+        max_docs=max_docs,
+        dry_run=dry_run,
+    )
+
+
 @router.patch(
     "/{urn}/enhance",
     dependencies=[Depends(auth(("admin", "expert", "agent")))],

@@ -449,7 +449,6 @@ def guide_index(dim: int) -> Dict[str, Any]:
 
 
 def guideline_index(dim: int) -> Dict[str, Any]:
-    del dim
     return {
         "settings": DEFAULT_SETTINGS,
         "mappings": {
@@ -505,6 +504,52 @@ def guideline_index(dim: int) -> Dict[str, Any]:
                     "type": "text",
                     "analyzer": "default_text",
                     "search_analyzer": "default_text",
+                },
+                # Context the rule was extracted from. Searchable so a query can
+                # match a rule through what surrounded it, not only its own
+                # short sentence.
+                "page_summary": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                },
+                "section_label": {
+                    "type": "text",
+                    "analyzer": "default_text",
+                    "search_analyzer": "default_text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                },
+                # ----------------------------
+                # Enrichment facets
+                # ----------------------------
+                "life_stage": {"type": "keyword"},
+                "age_min_months": {"type": "integer"},
+                "age_max_months": {"type": "integer"},
+                "setting": {"type": "keyword"},
+                "health_conditions": {"type": "keyword"},
+                "nutrients": {"type": "keyword"},
+                "guideline_type": {"type": "keyword"},
+                "topic": {"type": "keyword"},
+                "audience": {"type": "keyword"},
+                "applicable_regions": {"type": "keyword"},
+                # ----------------------------
+                # Extraction / enrichment provenance
+                # ----------------------------
+                "extractor_name": {"type": "keyword"},
+                "extractor_run_id": {"type": "keyword"},
+                "extraction_model": {"type": "keyword"},
+                "enrichment_version": {"type": "integer"},
+                "enrichment_confidence": {"type": "float"},
+                "ai_generated_fields": {"type": "keyword"},
+                "enhancements": {
+                    "type": "object",
+                    "enabled": False,
+                },
+                # Semantic embedding over rule text + facet labels
+                "embedding": _embedding_field(dim),
+                "embedded_at": {
+                    "type": "date",
+                    "format": "strict_date_optional_time||epoch_millis",
                 },
                 "status": {"type": "keyword"},
                 "review_status": {"type": "keyword"},

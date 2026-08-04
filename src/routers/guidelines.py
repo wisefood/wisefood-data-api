@@ -4,7 +4,16 @@ import kutils
 from auth import auth
 from entities.guidelines import GUIDELINE
 from routers.generic import render
-from schemas import GuidelineBulkImportSchema, GuidelineCreationSchema, GuidelineUpdateSchema, SearchSchema, GuidelineAutocompleteSchema
+from schemas import (
+    GuidelineAutocompleteSchema,
+    GuidelineBulkImportSchema,
+    GuidelineCreationSchema,
+    GuidelineEditorialPolicySchema,
+    GuidelineEnrichmentBatchSchema,
+    GuidelineEnrichmentSchema,
+    GuidelineUpdateSchema,
+    SearchSchema,
+)
 
 router = APIRouter(prefix="/api/v1/guidelines", tags=["Dietary Guideline Operations"])
 
@@ -128,6 +137,86 @@ def api_bulk_import_guidelines(
         spec=payload.model_dump(mode="json"),
         creator=kutils.current_user(request),
     )
+
+
+@router.post(
+    "/enrich-batch",
+    dependencies=[Depends(auth(("admin", "expert")))],
+    summary="Batch machine enrichment of guidelines",
+    description=(
+        "Write machine-derived facets (life stage, setting, nutrients, ...) onto up to "
+        "200 guidelines in one call. Fields with human-edited values are skipped unless "
+        "explicitly forced. Use dry_run to preview what would be written."
+    ),
+)
+@render()
+def api_enrich_guidelines_batch(
+    request: Request,
+    payload: GuidelineEnrichmentBatchSchema,
+):
+    return GUIDELINE.enrich_batch(payload, enricher=kutils.current_user(request))
+
+
+@router.post(
+    "/editorial-policy",
+    dependencies=[Depends(auth(("admin",)))],
+    summary="Batch edit guideline lifecycle state",
+    description=(
+        "Bulk-set status/review_status/visibility/applicability_status on every matching "
+        "guideline (e.g. activate a reviewed guide's rules so they become retrievable). "
+        "Selection requires ids, q, or fq — never the whole corpus. Always dry_run first."
+    ),
+)
+@render()
+def api_guideline_editorial_policy(
+    request: Request,
+    payload: GuidelineEditorialPolicySchema,
+):
+    return GUIDELINE.set_editorial_policy(payload, updater=kutils.current_user(request))
+
+
+@router.post(
+    "/embeddings/backfill",
+    dependencies=[Depends(auth(("admin",)))],
+    summary="Queue existing guidelines for embedding",
+    description=(
+        "Queue stored guidelines for semantic embedding. Defaults to rules that "
+        "have no vector yet, so the call is safe to repeat and resumable after "
+        "an interruption. Scope to one guide with guide_urn."
+    ),
+)
+@render()
+def api_backfill_guideline_embeddings(
+    request: Request,
+    guide_urn: str | None = None,
+    only_missing: bool = True,
+    max_docs: int | None = None,
+    dry_run: bool = False,
+):
+    return GUIDELINE.backfill_embeddings(
+        guide_urn=guide_urn,
+        only_missing=only_missing,
+        max_docs=max_docs,
+        dry_run=dry_run,
+    )
+
+
+@router.patch(
+    "/{id}/enrich",
+    dependencies=[Depends(auth(("admin", "expert")))],
+    summary="Machine-enrich a single guideline",
+    description=(
+        "Write machine-derived facets onto one guideline. Human-edited values are "
+        "preserved unless the field is listed in force_fields."
+    ),
+)
+@render()
+def api_enrich_guideline(
+    request: Request,
+    id: str,
+    payload: GuidelineEnrichmentSchema,
+):
+    return GUIDELINE.enrich(id, payload, enricher=kutils.current_user(request))
 
 
 @router.get(

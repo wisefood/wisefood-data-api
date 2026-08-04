@@ -66,6 +66,15 @@ class RedisClient:
         except Exception as e:
             raise BadGatewayError(e)
 
+    def llen(self, key, db: int | None = None):
+        """Length of a Redis list, for reporting queue depth."""
+        try:
+            db_to_use = db if db is not None else int(os.getenv("REDIS_DB", 1))
+            conn = redis.Redis(connection_pool=self._get_pool(db_to_use))
+            return int(conn.llen(key))
+        except Exception as e:
+            raise BadGatewayError(e)
+
     def lpush(self, key, value, db: int | None = None):
         """Push a value to the left of a Redis list."""
         try:

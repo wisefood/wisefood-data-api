@@ -27,6 +27,7 @@ from schemas import (
     ArticleEnhancementSchema,
     ArticleUpdateSchema,
     ArticleSchema,
+    SearchSchema,
 )
 
 from entity import Entity
@@ -195,6 +196,103 @@ class Article(Entity):
             "agent": spec.agent,
         }
 
+
+    EMBEDDING_BACKFILL_MAX_DOCS = 10000
+    EMBEDDING_BACKFILL_MAX_SCAN = 200000
+
+    def backfill_embeddings(
+        self,
+        *,
+        only_missing: bool = True,
+        max_docs: Optional[int] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Queue existing articles for embedding.
+
+        Articles are embedded on create only, so anything ingested before that
+        path existed — or created while Redis was down, since the enqueue is
+        deliberately fire-and-forget — has no vector. ``only_missing`` makes the
+        run resumable.
+        """
+        # Deliberately not filtered on `embedded_at`: the worker sets it
+        # asynchronously, so filtering on it would shift the result set under
+        # the paging cursor mid-run — skipping pages, or re-queueing the same
+        # unprocessed documents forever if the cursor were reset to compensate.
+        fq = ["NOT status:deleted"]
+
+        limit = min(
+            int(max_docs or self.EMBEDDING_BACKFILL_MAX_DOCS),
+            self.EMBEDDING_BACKFILL_MAX_DOCS,
+        )
+
+        queued = 0
+        failed = 0
+        skipped = 0
+        scanned = 0
+        offset = 0
+        page_size = 500
+        seen: set = set()
+
+        while queued + failed < limit and scanned < self.EMBEDDING_BACKFILL_MAX_SCAN:
+            qspec = SearchSchema.model_validate(
+                {
+                    "limit": page_size,
+                    "offset": offset,
+                    "fq": list(fq),
+                    "sort": "urn asc",
+                    "fl": ["urn", "title", "abstract", "content", "embedded_at"],
+                }
+            )
+            try:
+                response = ELASTIC_CLIENT.search_entities(
+                    index_name=self.collection_name, qspec=qspec
+                )
+            except Exception as e:
+                raise InternalError(f"Failed to scan articles for embedding: {e}")
+
+            results = response.get("results", [])
+            if not results:
+                break
+
+            scanned += len(results)
+
+            for article in results:
+                if queued + failed >= limit:
+                    break
+                urn = article.get("urn")
+                if not urn or urn in seen:
+                    continue
+                seen.add(urn)
+
+                if only_missing and article.get("embedded_at"):
+                    skipped += 1
+                    continue
+                if dry_run:
+                    queued += 1
+                    continue
+                try:
+                    EMBEDDING_QUEUE.enqueue(self.embed(urn, article))
+                    queued += 1
+                except Exception:
+                    failed += 1
+                    logger.warning(
+                        "Could not queue article %s for embedding", urn, exc_info=True
+                    )
+
+            if len(results) < page_size:
+                break
+            offset += len(results)
+
+        return {
+            "dry_run": dry_run,
+            "only_missing": only_missing,
+            "queued": queued,
+            "failed": failed,
+            "skipped_already_embedded": skipped,
+            "scanned": scanned,
+            "max_docs": limit,
+        }
 
     # ------------------------------------------------------------------ #
     # Editorial policy (reader visibility + indexing tier)

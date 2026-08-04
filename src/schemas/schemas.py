@@ -223,6 +223,71 @@ class QuantityOperator(str, Enum):
     approx = "approx"
 
 
+class GuidelineLifeStage(str, Enum):
+    pregnancy = "pregnancy"
+    lactation = "lactation"
+    infancy = "infancy"
+    early_childhood = "early_childhood"
+    school_age = "school_age"
+    adolescence = "adolescence"
+    adulthood = "adulthood"
+    older_adulthood = "older_adulthood"
+
+
+class GuidelineSetting(str, Enum):
+    school = "school"
+    home = "home"
+    clinical = "clinical"
+    community = "community"
+    workplace = "workplace"
+    retail = "retail"
+    general = "general"
+
+
+class GuidelineType(str, Enum):
+    food_based = "food_based"
+    nutrient_based = "nutrient_based"
+    behavioral = "behavioral"
+    activity = "activity"
+    other = "other"
+
+
+class GuidelineAudience(str, Enum):
+    caregiver = "caregiver"
+    individual = "individual"
+    health_professional = "health_professional"
+    policy_maker = "policy_maker"
+    educator = "educator"
+
+
+class GuidelineEnrichableField(str, Enum):
+    """
+    Fields a machine enrichment pass may write on a guideline.
+
+    Deliberately excludes ``rule_text`` and every editorial/lifecycle axis
+    (``status``, ``review_status``, ``visibility``) — enrichment annotates,
+    it never publishes.
+    """
+
+    life_stage = "life_stage"
+    age_min_months = "age_min_months"
+    age_max_months = "age_max_months"
+    setting = "setting"
+    health_conditions = "health_conditions"
+    nutrients = "nutrients"
+    guideline_type = "guideline_type"
+    topic = "topic"
+    audience = "audience"
+    applicable_regions = "applicable_regions"
+    target_populations = "target_populations"
+    food_groups = "food_groups"
+    frequency = "frequency"
+    quantity = "quantity"
+    action_type = "action_type"
+    enrichment_version = "enrichment_version"
+    enrichment_confidence = "enrichment_confidence"
+
+
 def validate_editorial_state(
     data: Dict[str, Any], *, partial: bool = False
 ) -> Dict[str, Any]:
@@ -881,6 +946,83 @@ class GuidelineSchema(BaseModel):
     notes: Optional[NonEmptyAbstract] = Field(
         None, description="Additional notes about the guideline"
     )
+    page_summary: Optional[NonEmptyAbstract] = Field(
+        None,
+        description=(
+            "What the source page covered, captured during extraction. A rule "
+            "sentence is short and context-free on its own; this is the "
+            "surrounding context it came from, used for review and enrichment."
+        ),
+    )
+    section_label: Optional[NonEmptyStr] = Field(
+        None,
+        description="Heading or table caption the rule sits under in the source",
+    )
+    life_stage: List[GuidelineLifeStage] = Field(
+        default_factory=list, description="Life stages the guideline applies to"
+    )
+    age_min_months: Optional[int] = Field(
+        None, ge=0, description="Lower age bound in months (inclusive); null = unbounded"
+    )
+    age_max_months: Optional[int] = Field(
+        None, ge=0, description="Upper age bound in months (inclusive); null = unbounded"
+    )
+    setting: List[GuidelineSetting] = Field(
+        default_factory=list, description="Settings where the guideline applies"
+    )
+    health_conditions: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Health conditions the guideline addresses (open vocabulary)",
+    )
+    nutrients: List[NonEmptyStr] = Field(
+        default_factory=list,
+        description="Nutrients the guideline concerns (open vocabulary)",
+    )
+    guideline_type: Optional[GuidelineType] = Field(
+        None, description="Nature of the recommendation"
+    )
+    topic: List[NonEmptyStr] = Field(
+        default_factory=list, description="Topical labels (controlled-ish vocabulary)"
+    )
+    audience: List[GuidelineAudience] = Field(
+        default_factory=list,
+        description="Who the guidance is addressed to (caregiver, individual, ...)",
+    )
+    applicable_regions: List[Iso3166_1a2] = Field(
+        default_factory=list,
+        description="Regions the guideline applies to; defaults to the parent guide's region",
+    )
+    extractor_name: Optional[NonEmptyStr] = Field(
+        None, description="Name of the extraction pipeline that produced this record"
+    )
+    extractor_run_id: Optional[NonEmptyStr] = Field(
+        None, description="Identifier of the extraction run that produced this record"
+    )
+    extraction_model: Optional[NonEmptyStr] = Field(
+        None, description="Model used by the extraction pipeline"
+    )
+    enrichment_version: Optional[int] = Field(
+        None, ge=0, description="Version of the enrichment pass last applied"
+    )
+    enrichment_confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="Confidence reported by the enrichment agent"
+    )
+    ai_generated_fields: List[str] = Field(
+        default_factory=list,
+        description="Fields whose current value was machine-written (extraction or enrichment)",
+    )
+    enhancements: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Audit log of machine enrichment events"
+    )
+    # Declared so stored documents still validate under extra="forbid" once the
+    # embedding worker has written a vector, but excluded from responses: 384
+    # floats per rule would dominate every list payload and no client reads it.
+    embedding: Optional[List[float]] = Field(
+        None, description="Semantic embedding vector (never serialized)", exclude=True
+    )
+    embedded_at: Optional[datetime] = Field(
+        None, description="When the embedding vector was last computed"
+    )
     status: Status = Field(default=Status.active, description="Lifecycle status")
     review_status: ReviewStatus = Field(
         default=ReviewStatus.unreviewed,
@@ -912,7 +1054,19 @@ class GuidelineSchema(BaseModel):
     @model_validator(mode="after")
     def validate_workflow(self):
         validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
+        validate_guideline_age_range(self.age_min_months, self.age_max_months)
         return self
+
+
+def validate_guideline_age_range(
+    age_min_months: Optional[int], age_max_months: Optional[int]
+) -> None:
+    if (
+        age_min_months is not None
+        and age_max_months is not None
+        and age_max_months < age_min_months
+    ):
+        raise ValueError("age_max_months must be greater than or equal to age_min_months")
 
 
 class GuidelineCreationSchema(BaseModel):
@@ -944,6 +1098,22 @@ class GuidelineCreationSchema(BaseModel):
     food_groups: List[GuidelineFoodGroup] = Field(default_factory=list)
     source_refs: List[GuidelineSourceReferenceSchema] = Field(default_factory=list)
     notes: Optional[NonEmptyAbstract] = None
+    page_summary: Optional[NonEmptyAbstract] = None
+    section_label: Optional[NonEmptyStr] = None
+    life_stage: List[GuidelineLifeStage] = Field(default_factory=list)
+    age_min_months: Optional[int] = Field(None, ge=0)
+    age_max_months: Optional[int] = Field(None, ge=0)
+    setting: List[GuidelineSetting] = Field(default_factory=list)
+    health_conditions: List[NonEmptyStr] = Field(default_factory=list)
+    nutrients: List[NonEmptyStr] = Field(default_factory=list)
+    guideline_type: Optional[GuidelineType] = None
+    topic: List[NonEmptyStr] = Field(default_factory=list)
+    audience: List[GuidelineAudience] = Field(default_factory=list)
+    applicable_regions: List[Iso3166_1a2] = Field(default_factory=list)
+    extractor_name: Optional[NonEmptyStr] = None
+    extractor_run_id: Optional[NonEmptyStr] = None
+    extraction_model: Optional[NonEmptyStr] = None
+    ai_generated_fields: List[str] = Field(default_factory=list)
     status: Status = Field(default=Status.draft, description="Lifecycle status")
     review_status: ReviewStatus = Field(default=ReviewStatus.unreviewed)
     visibility: Visibility = Field(default=Visibility.internal)
@@ -956,6 +1126,7 @@ class GuidelineCreationSchema(BaseModel):
     @model_validator(mode="after")
     def validate_workflow(self):
         validate_editorial_state(self.model_dump(mode="python", exclude_none=True))
+        validate_guideline_age_range(self.age_min_months, self.age_max_months)
         return self
 
 
@@ -977,6 +1148,18 @@ class GuidelineUpdateSchema(BaseModel):
     food_groups: List[GuidelineFoodGroup] | None = None
     source_refs: List[GuidelineSourceReferenceSchema] | None = None
     notes: Optional[NonEmptyAbstract] = None
+    page_summary: Optional[NonEmptyAbstract] = None
+    section_label: Optional[NonEmptyStr] = None
+    life_stage: List[GuidelineLifeStage] | None = None
+    age_min_months: Optional[int] = Field(None, ge=0)
+    age_max_months: Optional[int] = Field(None, ge=0)
+    setting: List[GuidelineSetting] | None = None
+    health_conditions: List[NonEmptyStr] | None = None
+    nutrients: List[NonEmptyStr] | None = None
+    guideline_type: GuidelineType | None = None
+    topic: List[NonEmptyStr] | None = None
+    audience: List[GuidelineAudience] | None = None
+    applicable_regions: List[Iso3166_1a2] | None = None
     status: Status | None = None
     review_status: ReviewStatus | None = None
     visibility: Visibility | None = None
@@ -989,6 +1172,7 @@ class GuidelineUpdateSchema(BaseModel):
         validate_editorial_state(
             self.model_dump(mode="python", exclude_none=True), partial=True
         )
+        validate_guideline_age_range(self.age_min_months, self.age_max_months)
         return self
 
 
@@ -1013,6 +1197,22 @@ class GuidelineBulkImportItemSchema(BaseModel):
     food_groups: List["GuidelineFoodGroup"] = Field(default_factory=list)
     source_refs: List["GuidelineSourceReferenceSchema"] = Field(default_factory=list)
     notes: Optional[NonEmptyAbstract] = None
+    page_summary: Optional[NonEmptyAbstract] = None
+    section_label: Optional[NonEmptyStr] = None
+    life_stage: List["GuidelineLifeStage"] = Field(default_factory=list)
+    age_min_months: Optional[int] = Field(None, ge=0)
+    age_max_months: Optional[int] = Field(None, ge=0)
+    setting: List["GuidelineSetting"] = Field(default_factory=list)
+    health_conditions: List[NonEmptyStr] = Field(default_factory=list)
+    nutrients: List[NonEmptyStr] = Field(default_factory=list)
+    guideline_type: Optional["GuidelineType"] = None
+    topic: List[NonEmptyStr] = Field(default_factory=list)
+    audience: List["GuidelineAudience"] = Field(default_factory=list)
+    applicable_regions: List[Iso3166_1a2] = Field(default_factory=list)
+    extractor_name: Optional[NonEmptyStr] = None
+    extractor_run_id: Optional[NonEmptyStr] = None
+    extraction_model: Optional[NonEmptyStr] = None
+    ai_generated_fields: List[str] = Field(default_factory=list)
     status: "Status" = Field(default=Status.draft)
     review_status: "ReviewStatus" = Field(default=ReviewStatus.unreviewed)
     visibility: "Visibility" = Field(default=Visibility.internal)
@@ -1032,6 +1232,144 @@ class GuidelineBulkImportSchema(BaseModel):
         List[GuidelineBulkImportItemSchema],
         Field(min_length=1, max_length=1000),
     ] = Field(..., description="Guidelines to import (max 1000 per call)")
+
+
+class GuidelineEnrichmentSchema(BaseModel):
+    """
+    Machine-written facet update for a single guideline.
+
+    ``fields`` may only carry :class:`GuidelineEnrichableField` keys. A field is
+    applied only when its current value is empty or already machine-written
+    (listed in the doc's ``ai_generated_fields``); ``force_fields`` bypasses
+    that guard for explicitly named fields — the caller asserts no human edit
+    is being overwritten (e.g. a first-version backfill over unreviewed docs).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, use_enum_values=True)
+
+    agent: SlugStr = Field(
+        ..., description="Agent identifier (lowercase with dashes or underscores)"
+    )
+    fields: Dict[GuidelineEnrichableField, Any] = Field(
+        ..., description="Facet values keyed by allowed enrichable field names"
+    )
+    force_fields: List[GuidelineEnrichableField] = Field(
+        default_factory=list,
+        description="Fields to write even if their current value is not machine-written",
+    )
+
+    @field_validator("fields")
+    @classmethod
+    def validate_fields_not_empty(cls, v):
+        if not v:
+            raise ValueError("fields must contain at least one enrichable field")
+        return v
+
+
+class GuidelineEnrichmentBatchItemSchema(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, use_enum_values=True)
+
+    id: UUID = Field(..., description="Guideline UUID to enrich")
+    fields: Dict[GuidelineEnrichableField, Any] = Field(
+        ..., description="Facet values keyed by allowed enrichable field names"
+    )
+    force_fields: List[GuidelineEnrichableField] = Field(default_factory=list)
+
+    @field_validator("fields")
+    @classmethod
+    def validate_fields_not_empty(cls, v):
+        if not v:
+            raise ValueError("fields must contain at least one enrichable field")
+        return v
+
+
+class GuidelineEnrichmentBatchSchema(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, use_enum_values=True)
+
+    agent: SlugStr = Field(
+        ..., description="Agent identifier (lowercase with dashes or underscores)"
+    )
+    items: Annotated[
+        List[GuidelineEnrichmentBatchItemSchema],
+        Field(min_length=1, max_length=200),
+    ] = Field(..., description="Per-guideline enrichment items (max 200 per call)")
+    dry_run: bool = Field(
+        default=False,
+        description="Validate and report what would be written without writing",
+    )
+
+
+class GuidelineEditorialPolicySchema(BaseModel):
+    """
+    Batch edit of guideline lifecycle/editorial state (e.g. bulk activation).
+
+    Selection mirrors ``POST /guidelines/search``: an explicit ``ids`` list,
+    ``q``, ``fq`` clauses, or any combination. At least one selector is
+    required — there is deliberately no "apply to everything" form.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_enum_values=True,
+    )
+
+    ids: Annotated[List[UUID], Field(min_length=0, max_length=10000)] = Field(
+        default_factory=list, description="Explicit guideline UUIDs to update"
+    )
+    q: Optional[str] = Field(
+        None, description="Free-text query; every term must match (AND)"
+    )
+    fq: Optional[List[NonEmptyStr]] = Field(
+        None,
+        description=(
+            "Filter clauses in query-string syntax, e.g. "
+            "['guide_urn:\"urn:guide:x\"', 'review_status:verified']"
+        ),
+    )
+
+    status: Optional[Status] = Field(
+        None, description="New lifecycle status; omit to leave unchanged"
+    )
+    review_status: Optional[ReviewStatus] = Field(
+        None, description="New review status; omit to leave unchanged"
+    )
+    visibility: Optional[Visibility] = Field(
+        None, description="New visibility; omit to leave unchanged"
+    )
+    applicability_status: Optional[ApplicabilityStatus] = Field(
+        None, description="New applicability status; omit to leave unchanged"
+    )
+
+    max_docs: Optional[int] = Field(
+        None,
+        ge=1,
+        le=10000,
+        description="Cap on documents to update (defaults to the 10000 hard cap)",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Report what would change without writing anything",
+    )
+
+    @model_validator(mode="after")
+    def validate_selection_and_change(self):
+        if not self.ids and not (self.q and self.q.strip()) and not self.fq:
+            raise ValueError(
+                "Provide at least one selector: ids, q, or fq. "
+                "Applying a policy to the entire corpus is not supported."
+            )
+        if (
+            self.status is None
+            and self.review_status is None
+            and self.visibility is None
+            and self.applicability_status is None
+        ):
+            raise ValueError(
+                "Specify at least one of status, review_status, visibility, "
+                "or applicability_status."
+            )
+        return self
 
 
 class GeographicContextSchema(BaseModel):
@@ -1384,6 +1722,16 @@ class ArticleCreationSchema(BaseModel):
         description="Publishing organization URN",
     )
 
+    # Editorial geography and language. Present on ArticleSchema and indexed,
+    # but omitted from the write schemas until now, so any client that set them
+    # got a 422 from extra="forbid" rather than the field being ignored.
+    region: Optional[NonEmptyStr] = Field(
+        None, description="Authoritative geographic region"
+    )
+    language: Optional[NonEmptyStr] = Field(
+        None, description="Language of the article (ISO code or name)"
+    )
+
     key_takeaways: Annotated[List[NonEmptyStr], Field(min_length=0, max_length=10)] = (
         Field(
             default_factory=list,
@@ -1496,6 +1844,15 @@ class ArticleUpdateSchema(BaseModel):
 
     type: Optional[str] = Field(
         None, description="Type of the article (e.g., 'JournalArticle', 'Review')"
+    )
+
+    # See the matching note on ArticleCreationSchema: both fields are part of
+    # the article record and were simply missing from the write schemas.
+    region: Optional[NonEmptyStr] = Field(
+        None, description="Authoritative geographic region"
+    )
+    language: Optional[NonEmptyStr] = Field(
+        None, description="Language of the article (ISO code or name)"
     )
 
     key_takeaways: (

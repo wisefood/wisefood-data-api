@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 PRIVILEGED_CATALOG_ROLES = frozenset({"admin", "expert"})
@@ -130,6 +130,58 @@ def apply_reader_visibility_filter(
         fq.append(clause)
     filtered_query["fq"] = fq
     return filtered_query
+
+
+# Enrichment bookkeeping fields that are always writable by an enrichment pass:
+# they describe the pass itself, not the guideline's content.
+ENRICHMENT_METADATA_FIELDS = frozenset({"enrichment_version", "enrichment_confidence"})
+
+
+def select_enrichable_updates(
+    current: Dict[str, Any],
+    fields: Dict[str, Any],
+    force_fields: Iterable[str] | None = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    Split a machine enrichment payload into (writable, skipped) field sets.
+
+    The no-clobber rule: a content field may be written only when its current
+    value is empty, or it was machine-written in a previous pass (listed in the
+    doc's ``ai_generated_fields``), or the caller explicitly forced it. Human
+    edits therefore survive re-enrichment by default.
+    """
+    machine_written = set(current.get("ai_generated_fields") or [])
+    forced = {str(name) for name in (force_fields or [])}
+
+    writable: Dict[str, Any] = {}
+    skipped: List[str] = []
+    for name, value in fields.items():
+        name = str(name)
+        if name in ENRICHMENT_METADATA_FIELDS:
+            writable[name] = value
+            continue
+
+        current_value = current.get(name)
+        is_empty = current_value is None or current_value == [] or current_value == {} or current_value == ""
+        if is_empty or name in machine_written or name in forced:
+            writable[name] = value
+        else:
+            skipped.append(name)
+
+    return writable, skipped
+
+
+def retain_human_edited_fields(
+    current_ai_fields: Iterable[str] | None,
+    edited_fields: Iterable[str],
+) -> List[str]:
+    """
+    ``ai_generated_fields`` after a human edit: any machine-written field the
+    editor just touched becomes human-owned, so future enrichment passes leave
+    it alone.
+    """
+    edited = {str(name) for name in edited_fields}
+    return [name for name in (current_ai_fields or []) if str(name) not in edited]
 
 
 def apply_public_catalog_filter(

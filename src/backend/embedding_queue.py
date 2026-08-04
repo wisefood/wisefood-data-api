@@ -51,6 +51,19 @@ class EmbeddingQueue:
     def get_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         return REDIS.get(self._status_key(job_id), db=self.db)
 
+    def depth(self) -> Optional[int]:
+        """
+        How many jobs are waiting to be embedded.
+
+        Returns None when Redis cannot be reached, which is a different thing
+        from an empty queue and must not be reported as "nothing pending".
+        """
+        try:
+            return REDIS.llen(self.queue_key, db=self.db)
+        except Exception as e:
+            logger.warning("Could not read embedding queue depth: %s", e)
+            return None
+
     def pop(self, timeout: int = 5) -> Optional[Dict[str, Any]]:
         """Blocking pop for workers; returns a dict or None on timeout."""
         item = REDIS.brpop(self.queue_key, timeout=timeout, db=self.db)
