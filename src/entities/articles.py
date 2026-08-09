@@ -32,6 +32,11 @@ from schemas import (
 
 from entity import Entity
 from backend.embedding_queue import EMBEDDING_QUEUE
+from embedding_policy import (
+    EMBEDDED_ARTICLE_FIELDS,
+    embedding_is_stale,
+    requires_reembedding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +111,7 @@ class Article(Entity):
             # Fetch article if content not provided in spec
             article = self.get(urn)
 
-        text_parts = [
-            article.get("title"),
-            article.get("abstract"),
-            article.get("content"),
-        ]
+        text_parts = [article.get(field) for field in EMBEDDED_ARTICLE_FIELDS]
         text = "\n".join([part for part in text_parts if part])
         if not text:
             raise DataError("No article text available for embedding.")
@@ -179,7 +180,7 @@ class Article(Entity):
         )
 
         # Re-embed if semantic fields changed
-        if any(f in ("title", "abstract", "content") for f in spec.fields):
+        if requires_reembedding(spec.fields, EMBEDDED_ARTICLE_FIELDS):
             EMBEDDING_QUEUE.enqueue(
                 self.embed(urn, None, enhancer)
             )
@@ -210,10 +211,15 @@ class Article(Entity):
         """
         Queue existing articles for embedding.
 
-        Articles are embedded on create only, so anything ingested before that
-        path existed — or created while Redis was down, since the enqueue is
-        deliberately fire-and-forget — has no vector. ``only_missing`` makes the
-        run resumable.
+        Articles are embedded on create, enhance and patch, so anything ingested
+        before those paths existed — or written while Redis was down, since the
+        enqueue is deliberately fire-and-forget — has no vector.
+
+        ``only_missing`` skips documents that are already embedded *and* whose
+        vector is still current. A document edited after it was embedded is
+        re-queued: its `embedded_at` is set, so presence alone would skip it
+        forever, and the stale vector would go on matching text that is no
+        longer there. Pass ``only_missing=False`` to re-embed everything.
         """
         # Deliberately not filtered on `embedded_at`: the worker sets it
         # asynchronously, so filtering on it would shift the result set under
@@ -241,7 +247,15 @@ class Article(Entity):
                     "offset": offset,
                     "fq": list(fq),
                     "sort": "urn asc",
-                    "fl": ["urn", "title", "abstract", "content", "embedded_at"],
+                    "fl": [
+                        "urn",
+                        "title",
+                        "abstract",
+                        "content",
+                        "embedded_at",
+                        # Needed to tell a current vector from a stale one.
+                        "updated_at",
+                    ],
                 }
             )
             try:
@@ -265,7 +279,13 @@ class Article(Entity):
                     continue
                 seen.add(urn)
 
-                if only_missing and article.get("embedded_at"):
+                if (
+                    only_missing
+                    and article.get("embedded_at")
+                    and not embedding_is_stale(
+                        article.get("updated_at"), article.get("embedded_at")
+                    )
+                ):
                     skipped += 1
                     continue
                 if dry_run:
@@ -461,7 +481,7 @@ class Article(Entity):
             "sample": preview,
         }
 
-    def patch(self, urn: str, spec: Dict[str, Any], updater=None) -> Dict[str, Any]:
+    def patch(self, urn: str, spec: Dict[str, Any], updater=None) -> None:
         """Partially update an existing article."""
         try:
             article_data = self.update_schema.model_validate(spec)
@@ -483,6 +503,30 @@ class Article(Entity):
             )
         except Exception as e:
             raise InternalError(f"Failed to update article: {e}")
+
+        # Re-embed if an editor changed the text the vector was built from.
+        #
+        # `create` and `enhance` both do this; `patch` did not, so a human
+        # rewriting a title or abstract in the console left the stored vector
+        # describing the previous wording. That failure is silent and worse
+        # than a missing embedding: `embedded_at` stays populated, so the
+        # article looks embedded, retrieval keeps matching the old text, and
+        # `backfill_embeddings(only_missing=True)` skips it forever.
+        #
+        # The field list mirrors `embed()`, which builds its text from exactly
+        # title + abstract + content. `exclude_unset` above means membership
+        # here reflects what the caller actually sent, so a status-only patch
+        # does not pay for an embedding.
+        if requires_reembedding(article_dict, EMBEDDED_ARTICLE_FIELDS):
+            try:
+                EMBEDDING_QUEUE.enqueue(self.embed(urn, None, updater))
+            except Exception as e:
+                # Fire-and-forget, as everywhere else: a queue outage must not
+                # fail an edit the editor already saw succeed. `backfill_embeddings`
+                # is the recovery path.
+                logger.error(
+                    "Failed to enqueue re-embedding for article %s: %s", urn, e
+                )
 
     def delete(self, urn: str) -> bool:
         # Permanently delete the article

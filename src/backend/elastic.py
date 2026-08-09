@@ -683,7 +683,86 @@ class ElasticsearchClientSingleton:
                 }
             )
 
+        self._annotate_stale_embeddings(report, names)
         return list(report.values())
+
+    def _annotate_stale_embeddings(
+        self, report: Dict[str, Dict[str, Any]], names: List[str]
+    ) -> None:
+        """
+        Add per-index counts of embedded-but-outdated documents.
+
+        A document edited after it was embedded keeps its ``embedded_at``, so
+        the coverage figure above still counts it as embedded — while its vector
+        describes text that is no longer there. Coverage alone therefore reads
+        100% while retrieval is quietly wrong, which is the state an operator
+        most needs to see.
+
+        Deliberately a second request rather than another sub-aggregation. The
+        comparison needs a script (Elasticsearch cannot compare two fields in a
+        plain filter), and a script failure aborts the whole search — folding it
+        into the coverage query would mean one scripting problem costs the
+        entire report. Here it costs only the staleness column, and the caller
+        can tell the difference: absent ``stale`` means "not measured", not zero.
+        """
+        try:
+            response = self.client.search(
+                index=",".join(names),
+                ignore_unavailable=True,
+                body={
+                    "size": 0,
+                    "query": {
+                        "bool": {"must_not": [{"term": {"status": "deleted"}}]}
+                    },
+                    "aggs": {
+                        "per_index": {
+                            "terms": {"field": "_index", "size": len(names) * 2},
+                            "aggs": {
+                                "stale": {
+                                    "filter": {
+                                        "script": {
+                                            "script": {
+                                                "lang": "painless",
+                                                "source": (
+                                                    "if (doc['embedded_at'].size() == 0 "
+                                                    "|| doc['updated_at'].size() == 0) "
+                                                    "{ return false; } "
+                                                    "return doc['updated_at'].value"
+                                                    ".toInstant().toEpochMilli() > "
+                                                    "doc['embedded_at'].value"
+                                                    ".toInstant().toEpochMilli();"
+                                                ),
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    },
+                },
+            )
+        except Exception as exc:
+            logger.warning("Could not read embedding staleness: %s", exc)
+            return
+
+        buckets = (
+            response.get("aggregations", {}).get("per_index", {}).get("buckets", [])
+        )
+        for bucket in buckets:
+            concrete = bucket.get("key", "")
+            name = next(
+                (candidate for candidate in names if concrete.startswith(candidate)),
+                None,
+            )
+            if name is None or not report[name].get("exists"):
+                continue
+
+            stale = bucket.get("stale", {}).get("doc_count", 0)
+            embedded = report[name].get("embedded", 0)
+            report[name]["stale"] = stale
+            # What is embedded *and* still accurate — the number that decides
+            # whether semantic retrieval can be trusted.
+            report[name]["current"] = max(embedded - stale, 0)
 
     def bulk_index(
         self,

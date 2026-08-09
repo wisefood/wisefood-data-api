@@ -25,6 +25,7 @@ from catalog_access import (
     select_enrichable_updates,
 )
 from entity import DependentEntity
+from embedding_policy import embedding_is_stale
 from entities.artifacts import ARTIFACT
 from exceptions import ConflictError, DataError, InternalError, NotFoundError
 from schemas import (
@@ -773,7 +774,16 @@ class Guideline(DependentEntity):
                     continue
                 seen.add(identifier)
 
-                if only_missing and guideline.get("embedded_at"):
+                # Presence of `embedded_at` is not enough: a rule edited after
+                # it was embedded keeps the timestamp and would be skipped
+                # forever, leaving a vector that describes the old wording.
+                if (
+                    only_missing
+                    and guideline.get("embedded_at")
+                    and not embedding_is_stale(
+                        guideline.get("updated_at"), guideline.get("embedded_at")
+                    )
+                ):
                     skipped += 1
                     continue
                 if dry_run:

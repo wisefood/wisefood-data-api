@@ -93,7 +93,14 @@ def index_state(request: Request):
     summary="Embedding coverage and queue state",
     description=(
         "How many documents per index carry a semantic vector, plus the depth of "
-        "the embedding job queue. `missing` is what a backfill would process. "
+        "the embedding job queue.\n\n"
+        "`missing` is documents that were never embedded. `stale` is documents "
+        "embedded from text that has since been edited — they still count "
+        "toward `embedded` and `coverage`, but their vector describes the "
+        "previous wording, so `current` (embedded minus stale) is the figure "
+        "that says whether semantic retrieval can be trusted. A backfill "
+        "processes both. `stale` absent means the measurement could not run, "
+        "which is not the same as zero.\n\n"
         "Admin only."
     ),
 )
