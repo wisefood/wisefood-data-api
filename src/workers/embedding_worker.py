@@ -13,6 +13,19 @@ from backend.elastic import ELASTIC_CLIENT
 
 logger = logging.getLogger(__name__)
 
+# Liveness the health endpoint can read: the worker is a daemon thread, and a
+# dead one is indistinguishable from an idle one without this. Jobs kept
+# reporting "queued" forever in production because a single transient Redis
+# error escaped the loop and silently killed the thread.
+WORKER_STATUS: Dict[str, Any] = {
+    "started_at": None,
+    "last_poll_at": None,
+    "processed": 0,
+    "failed": 0,
+    "loop_errors": 0,
+    "last_error": None,
+}
+
 
 def _split_into_paragraphs(text: str) -> List[str]:
     """
@@ -82,21 +95,49 @@ class EmbeddingWorker:
         """
         Main loop: pull jobs from the queue, process them, and block until stopped.
 
+        The loop itself must be unkillable: ``EMBEDDING_QUEUE.pop`` raises on
+        any Redis hiccup (a restart, a network blip, an idle blocking
+        connection reaped by a load balancer), and before this guard existed a
+        single such exception ended the thread permanently — every later
+        enqueue reported "queued" into a queue nothing consumed. Errors now
+        log, back off, and retry; only the stop event ends the loop.
+
         :param sleep_when_idle: Seconds to sleep when the queue is empty before
                                 polling again.
         :param stop_event: Optional threading.Event to allow clean shutdown.
         """
+        WORKER_STATUS["started_at"] = datetime.now().isoformat()
+        consecutive_errors = 0
         while True:
             if stop_event and stop_event.is_set():
                 logger.info("Stop event received; shutting down embedding worker.")
                 return
 
-            job = EMBEDDING_QUEUE.pop(timeout=5)
-            if not job:
-                time.sleep(sleep_when_idle)
-                continue
+            try:
+                WORKER_STATUS["last_poll_at"] = datetime.now().isoformat()
+                job = EMBEDDING_QUEUE.pop(timeout=5)
+                if not job:
+                    consecutive_errors = 0
+                    time.sleep(sleep_when_idle)
+                    continue
 
-            self._process_job(job)
+                self._process_job(job)
+                consecutive_errors = 0
+            except Exception as e:
+                consecutive_errors += 1
+                WORKER_STATUS["loop_errors"] += 1
+                WORKER_STATUS["last_error"] = f"{type(e).__name__}: {e}"
+                backoff = min(30, 2 * consecutive_errors)
+                logger.error(
+                    "Embedding worker loop error (attempt %d, retrying in %ds): %s",
+                    consecutive_errors,
+                    backoff,
+                    e,
+                )
+                if stop_event and stop_event.wait(backoff):
+                    return
+                if not stop_event:
+                    time.sleep(backoff)
 
     def _process_job(self, job: Dict[str, Any]) -> None:
         """
@@ -124,9 +165,12 @@ class EmbeddingWorker:
             EMBEDDING_QUEUE.mark_completed(
                 job_id, metadata={"urn": urn, "job_type": job_type}
             )
+            WORKER_STATUS["processed"] += 1
             logger.info("Completed %s job %s for %s", job_type, job_id, urn)
 
         except Exception as e:
+            WORKER_STATUS["failed"] += 1
+            WORKER_STATUS["last_error"] = f"{type(e).__name__}: {e}"
             logger.error("%s job %s for %s failed: %s", job_type, job_id, urn, e)
             EMBEDDING_QUEUE.mark_failed(job_id, str(e))
 

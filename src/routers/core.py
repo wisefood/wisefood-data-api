@@ -39,8 +39,11 @@ def info(request: Request):
 )
 @render()
 def health(request: Request):
+    from datetime import datetime
+
     from backend.elastic import ELASTIC_CLIENT
     from backend.embedding_queue import EMBEDDING_QUEUE
+    from workers.embedding_worker import WORKER_STATUS
 
     elasticsearch = ELASTIC_CLIENT.cluster_state()
     queue_depth = EMBEDDING_QUEUE.depth()
@@ -50,16 +53,34 @@ def health(request: Request):
     except Exception as exc:
         storage = {"healthy": False, "error": str(exc)}
 
+    # A dead worker daemon looks exactly like an idle one from the outside —
+    # and a dead one leaves every embedding job "queued" forever. The worker
+    # stamps each poll; a stale stamp (or none) means it is not consuming.
+    last_poll = WORKER_STATUS.get("last_poll_at")
+    worker_alive = False
+    if last_poll:
+        try:
+            age = (datetime.now() - datetime.fromisoformat(last_poll)).total_seconds()
+            worker_alive = age < 60
+        except (TypeError, ValueError):
+            worker_alive = False
+
     return {
         "elasticsearch": elasticsearch,
         # depth() returns None when Redis is unreachable, which is not the same
         # as an empty queue and must not be reported as healthy.
         "redis": {"reachable": queue_depth is not None},
+        "embedding_worker": {
+            "alive": worker_alive,
+            "queue_depth": queue_depth,
+            **WORKER_STATUS,
+        },
         "storage": storage,
         "healthy": bool(
             elasticsearch.get("reachable")
             and queue_depth is not None
             and storage.get("healthy")
+            and worker_alive
         ),
     }
 
