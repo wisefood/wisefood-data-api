@@ -7,6 +7,8 @@ import urllib.parse
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, Callable
 
 import httpx
+
+import obs_context
 from fastapi import Cookie, Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -250,6 +252,12 @@ def auth(
                     detail="Insufficient permissions",
                     extra={"required": required, "match": match, "roles": roles},
                 )
+        # Recorded for the rest of the request. This service verifies a JWT on
+        # every call and then used it for authorization only — the identity was
+        # discarded, which is why catalog reads and searches were invisible per
+        # user. Set here, at the one place the token is actually verified, so a
+        # route cannot report an identity that was never checked.
+        obs_context.set_user_sub(str(payload.get("sub") or "") or None)
         return payload
 
     return dependency

@@ -22,6 +22,7 @@ from exceptions import (
     NotFoundError,
 )
 import logging
+import time
 
 
 logger = logging.getLogger(__name__)
@@ -442,9 +443,50 @@ class Entity:
         except Exception as e:
             raise DataError(f"Invalid search query: {e}")
 
-        return ELASTIC_CLIENT.search_entities(
+        started = time.perf_counter()
+        result = ELASTIC_CLIENT.search_entities(
             index_name=self.collection_name, qspec=qspec
         )
+        # One place for all ten entity types. Catalog searches were entirely
+        # invisible before this: the service verified a token on every request
+        # and then used it for authorization only, so nobody could say what was
+        # being looked for, by whom, or how often it found nothing.
+        self._report_search(qspec, result, started)
+        return result
+
+    def _report_search(self, qspec, result, started) -> None:
+        """Report a catalog search. Never raises."""
+        try:
+            import obs_context
+            import wf_telemetry
+
+            # `total` is the number of matching documents; `results` is one
+            # page of them. Reporting the page length would cap every count at
+            # the page size and read zero for an offset past the end — a
+            # "nothing found" that found plenty.
+            count = None
+            if isinstance(result, dict):
+                count = result.get("total")
+                if count is None and isinstance(result.get("results"), list):
+                    count = len(result["results"])
+            elif isinstance(result, list):
+                count = len(result)
+
+            wf_telemetry.TELEMETRY.search(
+                surface=f"catalog:{self.name}",
+                raw_query=getattr(qspec, "q", None),
+                filters={
+                    "fq": list(getattr(qspec, "fq", None) or []),
+                    "sort": list(getattr(qspec, "sort", None) or []),
+                },
+                result_count_first_pass=count,
+                result_count_final=count,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                user_id=obs_context.get_user_sub(),
+                app="catalog",
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("catalog.search_report_failed", exc_info=True)
 
     def upsert_system_fields(self, spec: Dict, update=False) -> Dict[str, Any]:
         """

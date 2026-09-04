@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers.generic import install_error_handler
 import uvicorn
 import logsys
+import obs_context
+import wf_telemetry
 from workers.embedding_worker import EmbeddingWorker
 
 origins = [
@@ -82,6 +84,11 @@ config.setup()
 
 # Configure logging
 logsys.configure()
+# Every log line carries the correlation id of the request that caused it.
+obs_context.install_log_filter()
+# Report catalog searches back to the gateway. No-op unless
+# ANALYTICS_ENABLED and an ingest secret are both set.
+wf_telemetry.TELEMETRY.start(app="catalog")
 
 
 _worker_stop_event = threading.Event()
@@ -118,8 +125,12 @@ api.add_middleware(
     allow_credentials=True,           # set True if you send cookies / Authorization headers
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],              # or list specific headers
-    expose_headers=["Content-Length"],# optionally expose headers to browser
+    expose_headers=["Content-Length", "X-Request-Id"],
 )
+
+# Adopt the caller's X-Request-Id (or mint one). Added last, so it sits
+# outermost and the id exists before any other layer can log.
+api.add_middleware(obs_context.RequestContextMiddleware)
 
 # Initiliaze exception handlers
 install_error_handler(api)
